@@ -274,8 +274,7 @@ export async function loginToLTK(
     const allStorage = await page.evaluate(() => {
       const result: Record<string, string> = {};
 
-      // Log ALL localStorage keys
-      console.log('localStorage keys:', Object.keys(localStorage));
+      // Get ALL localStorage keys
       for (let i = 0; i < localStorage.length; i++) {
         const key = localStorage.key(i);
         if (key) {
@@ -284,8 +283,7 @@ export async function loginToLTK(
         }
       }
 
-      // Log ALL sessionStorage keys
-      console.log('sessionStorage keys:', Object.keys(sessionStorage));
+      // Get ALL sessionStorage keys
       for (let i = 0; i < sessionStorage.length; i++) {
         const key = sessionStorage.key(i);
         if (key) {
