@@ -23,7 +23,8 @@ export interface LTKLoginOptions {
   headless?: boolean; // Show browser for debugging (default: true)
 }
 
-const LTK_LOGIN_URL = 'https://creator.shopltk.com';
+const LTK_BASE_URL = 'https://creator.shopltk.com';
+const LTK_AUTH_URL = 'https://creator-auth.shopltk.com/login';
 const DEFAULT_TIMEOUT = 60000; // 60 seconds
 
 /**
@@ -63,46 +64,36 @@ export async function loginToLTK(
     );
     
     console.log('[LTK Login] Navigating to LTK...');
-    
-    // Navigate to LTK
-    await page.goto(LTK_LOGIN_URL, {
+
+    // Navigate to LTK base URL - it should redirect to auth page
+    await page.goto(LTK_BASE_URL, {
       waitUntil: 'networkidle2',
       timeout,
     });
-    
-    // Wait a moment for any redirects
+
+    let currentUrl = page.url();
+    console.log('[LTK Login] Initial URL after navigation:', currentUrl);
+
+    // Wait for potential redirect to auth page
     await delay(2000);
-    
-    // Check if we're already on a login page or need to click login
-    const currentUrl = page.url();
-    console.log('[LTK Login] Current URL:', currentUrl);
-    
-    // LTK uses Auth0 - look for their login form
-    // The form might be on the main page or we might need to click a login button
-    
-    // Try to find and click login button if on landing page
-    const loginButtonSelectors = [
-      'a[href*="login"]',
-      'a[href*="signin"]',
-      '[data-testid="login-button"]',
-      '.login-button',
-      '.sign-in-button',
-    ];
-    
-    for (const selector of loginButtonSelectors) {
-      try {
-        const button = await page.$(selector);
-        if (button) {
-          console.log('[LTK Login] Found login button, clicking...');
-          await button.click();
-          await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 10000 }).catch(() => {});
-          await delay(1000);
-          break;
-        }
-      } catch {
-        // Continue trying other selectors
-      }
+    currentUrl = page.url();
+    console.log('[LTK Login] URL after delay:', currentUrl);
+
+    // If not on auth page, navigate directly to it
+    if (!currentUrl.includes('creator-auth.shopltk.com')) {
+      console.log('[LTK Login] Not on auth page, navigating directly to:', LTK_AUTH_URL);
+      await page.goto(LTK_AUTH_URL, {
+        waitUntil: 'networkidle2',
+        timeout,
+      });
+      await delay(2000);
+      currentUrl = page.url();
+      console.log('[LTK Login] URL after direct auth navigation:', currentUrl);
     }
+
+    // Take a screenshot for debugging
+    await page.screenshot({ path: '/tmp/ltk-login-page.png' });
+    console.log('[LTK Login] Screenshot saved to /tmp/ltk-login-page.png');
     
     // Now look for the Auth0 login form
     console.log('[LTK Login] Looking for login form...');
@@ -130,10 +121,12 @@ export async function loginToLTK(
     
     if (!emailField) {
       // Take a screenshot for debugging
-      await page.screenshot({ path: '/tmp/ltk-login-debug.png' });
-      console.log('[LTK Login] Screenshot saved to /tmp/ltk-login-debug.png');
-      
-      throw new Error('Could not find email input field');
+      await page.screenshot({ path: '/tmp/ltk-login-email-not-found.png' });
+      console.log('[LTK Login] Screenshot saved to /tmp/ltk-login-email-not-found.png');
+      console.log('[LTK Login] Current URL:', page.url());
+      console.log('[LTK Login] Page title:', await page.title());
+
+      throw new Error(`Could not find email input field. Current URL: ${page.url()}`);
     }
     
     // Type email
@@ -243,52 +236,131 @@ export async function loginToLTK(
     // Extract cookies
     console.log('[LTK Login] Extracting authentication cookies...');
     const cookies = await page.cookies();
-    
-    // Find the auth tokens
-    const accessTokenCookie = cookies.find(c => c.name === 'auth._token.auth0');
-    const idTokenCookie = cookies.find(c => c.name === 'auth._id_token.auth0');
-    
-    if (!accessTokenCookie || !idTokenCookie) {
-      // Try alternative cookie names
-      const altAccessToken = cookies.find(c => 
-        c.name.includes('access_token') || c.name.includes('accessToken')
-      );
-      const altIdToken = cookies.find(c => 
-        c.name.includes('id_token') || c.name.includes('idToken')
-      );
-      
-      console.log('[LTK Login] Available cookies:', cookies.map(c => c.name).join(', '));
-      
-      if (!altAccessToken || !altIdToken) {
-        return {
-          success: false,
-          error: 'Login succeeded but authentication tokens not found in cookies',
-          errorCode: 'UNKNOWN',
-        };
+
+    // Log ALL cookies for debugging
+    console.log('[LTK Login] ===== ALL COOKIES =====');
+    console.log('[LTK Login] Total cookies found:', cookies.length);
+    cookies.forEach((c, i) => {
+      const valuePreview = c.value.length > 50 ? c.value.substring(0, 50) + '...' : c.value;
+      console.log(`[LTK Login] Cookie ${i + 1}: ${c.name} = ${valuePreview}`);
+      console.log(`[LTK Login]   Domain: ${c.domain}, Path: ${c.path}, Expires: ${c.expires}`);
+    });
+    console.log('[LTK Login] ===== END COOKIES =====');
+
+    // Find the auth tokens - try LTK-specific cookie names first
+    const ltkCookieNames = [
+      '_Legacy_auth0',
+      'auth0.authenticated',
+      'NMIT.is.authenticated',
+      'auth._token.auth0',
+      'auth._id_token.auth0',
+    ];
+
+    console.log('[LTK Login] Looking for cookies:', ltkCookieNames.join(', '));
+
+    // Find any auth-related cookies
+    const authCookies = cookies.filter(c =>
+      c.name.includes('auth') ||
+      c.name.includes('token') ||
+      c.name.includes('Auth') ||
+      c.name.includes('Token') ||
+      c.name.includes('NMIT') ||
+      c.name.includes('Legacy')
+    );
+
+    console.log('[LTK Login] Auth-related cookies found:', authCookies.map(c => c.name).join(', '));
+
+    // Check localStorage and sessionStorage - log ALL keys
+    const allStorage = await page.evaluate(() => {
+      const result: Record<string, string> = {};
+
+      // Log ALL localStorage keys
+      console.log('localStorage keys:', Object.keys(localStorage));
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key) {
+          const value = localStorage.getItem(key) || '';
+          result[`localStorage:${key}`] = value.substring(0, 200);
+        }
+      }
+
+      // Log ALL sessionStorage keys
+      console.log('sessionStorage keys:', Object.keys(sessionStorage));
+      for (let i = 0; i < sessionStorage.length; i++) {
+        const key = sessionStorage.key(i);
+        if (key) {
+          const value = sessionStorage.getItem(key) || '';
+          result[`sessionStorage:${key}`] = value.substring(0, 200);
+        }
+      }
+
+      return result;
+    });
+
+    console.log('[LTK Login] ===== ALL STORAGE (localStorage + sessionStorage) =====');
+    console.log('[LTK Login] Total storage items:', Object.keys(allStorage).length);
+    Object.entries(allStorage).forEach(([key, value]) => {
+      console.log(`[LTK Login] ${key}: ${value}${value.length >= 200 ? '...' : ''}`);
+    });
+    console.log('[LTK Login] ===== END STORAGE =====');
+
+    // Try to find tokens - check multiple sources
+    let accessToken = '';
+    let idToken = '';
+    let tokenSource = 'none';
+
+    // Check cookies first
+    for (const cookie of authCookies) {
+      if (cookie.value && cookie.value.length > 20) {
+        // This might be a token
+        if (cookie.name.includes('token') || cookie.name.includes('Token')) {
+          if (!accessToken) {
+            accessToken = decodeURIComponent(cookie.value).replace('Bearer ', '');
+            tokenSource = `cookie:${cookie.name}`;
+          }
+        }
       }
     }
-    
-    // Decode URL-encoded tokens
-    const accessToken = decodeURIComponent(
-      accessTokenCookie?.value || ''
-    ).replace('Bearer ', '');
-    
-    const idToken = decodeURIComponent(
-      idTokenCookie?.value || ''
-    );
-    
+
+    // Check localStorage for tokens
+    for (const [key, value] of Object.entries(allStorage)) {
+      if (key.includes('localStorage') && value && value.length > 20) {
+        if (key.includes('token') || key.includes('Token') || key.includes('access')) {
+          if (!accessToken) {
+            accessToken = value;
+            tokenSource = key;
+          }
+        }
+        if (key.includes('id_token') || key.includes('idToken')) {
+          if (!idToken) {
+            idToken = value;
+          }
+        }
+      }
+    }
+
+    console.log('[LTK Login] Token source:', tokenSource);
+    console.log('[LTK Login] Access token found:', accessToken.length > 0 ? `Yes (${accessToken.length} chars)` : 'No');
+    console.log('[LTK Login] ID token found:', idToken.length > 0 ? `Yes (${idToken.length} chars)` : 'No');
+
+    // If we still don't have tokens, return error with debug info
+    if (!accessToken) {
+      return {
+        success: false,
+        error: `Login succeeded but no tokens found. Cookies: ${authCookies.map(c => c.name).join(', ')}. Storage keys: ${Object.keys(allStorage).join(', ')}`,
+        errorCode: 'UNKNOWN',
+      };
+    }
+
     // Calculate expiration (tokens typically last 1 hour)
-    // The cookie might have an expiration, or we estimate
-    const expiresAt = accessTokenCookie?.expires 
-      ? Math.floor(accessTokenCookie.expires)
-      : Math.floor(Date.now() / 1000) + 3600; // 1 hour from now
-    
+    const expiresAt = Math.floor(Date.now() / 1000) + 3600; // 1 hour from now
+
     console.log('[LTK Login] Successfully extracted tokens!');
-    
+
     return {
       success: true,
       accessToken,
-      idToken,
+      idToken: idToken || accessToken, // Use access token as fallback for id token
       expiresAt,
     };
     
