@@ -236,47 +236,91 @@ export async function loginToLTK(
     // Extract cookies
     console.log('[LTK Login] Extracting authentication cookies...');
     const cookies = await page.cookies();
-    
-    // Find the auth tokens
+
+    // Log ALL cookies for debugging
+    console.log('[LTK Login] ===== ALL COOKIES =====');
+    console.log('[LTK Login] Total cookies found:', cookies.length);
+    cookies.forEach((c, i) => {
+      const valuePreview = c.value.length > 50 ? c.value.substring(0, 50) + '...' : c.value;
+      console.log(`[LTK Login] Cookie ${i + 1}: ${c.name} = ${valuePreview}`);
+      console.log(`[LTK Login]   Domain: ${c.domain}, Path: ${c.path}, Expires: ${c.expires}`);
+    });
+    console.log('[LTK Login] ===== END COOKIES =====');
+
+    // Find the auth tokens - try multiple possible names
     const accessTokenCookie = cookies.find(c => c.name === 'auth._token.auth0');
     const idTokenCookie = cookies.find(c => c.name === 'auth._id_token.auth0');
-    
-    if (!accessTokenCookie || !idTokenCookie) {
-      // Try alternative cookie names
-      const altAccessToken = cookies.find(c => 
-        c.name.includes('access_token') || c.name.includes('accessToken')
-      );
-      const altIdToken = cookies.find(c => 
-        c.name.includes('id_token') || c.name.includes('idToken')
-      );
-      
-      console.log('[LTK Login] Available cookies:', cookies.map(c => c.name).join(', '));
-      
-      if (!altAccessToken || !altIdToken) {
-        return {
-          success: false,
-          error: 'Login succeeded but authentication tokens not found in cookies',
-          errorCode: 'UNKNOWN',
-        };
+
+    // Try alternative cookie names if primary not found
+    const altAccessToken = cookies.find(c =>
+      c.name.includes('access_token') ||
+      c.name.includes('accessToken') ||
+      c.name.includes('token') && !c.name.includes('id_token')
+    );
+    const altIdToken = cookies.find(c =>
+      c.name.includes('id_token') ||
+      c.name.includes('idToken')
+    );
+
+    // Also check localStorage and sessionStorage via page.evaluate
+    const storageTokens = await page.evaluate(() => {
+      const result: Record<string, string> = {};
+      // Check localStorage
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && (key.includes('token') || key.includes('auth') || key.includes('Token'))) {
+          result[`localStorage:${key}`] = localStorage.getItem(key)?.substring(0, 100) || '';
+        }
       }
+      // Check sessionStorage
+      for (let i = 0; i < sessionStorage.length; i++) {
+        const key = sessionStorage.key(i);
+        if (key && (key.includes('token') || key.includes('auth') || key.includes('Token'))) {
+          result[`sessionStorage:${key}`] = sessionStorage.getItem(key)?.substring(0, 100) || '';
+        }
+      }
+      return result;
+    });
+
+    console.log('[LTK Login] ===== STORAGE TOKENS =====');
+    Object.entries(storageTokens).forEach(([key, value]) => {
+      console.log(`[LTK Login] ${key}: ${value}...`);
+    });
+    console.log('[LTK Login] ===== END STORAGE =====');
+
+    if (!accessTokenCookie && !idTokenCookie && !altAccessToken && !altIdToken) {
+      return {
+        success: false,
+        error: 'Login succeeded but authentication tokens not found in cookies or storage',
+        errorCode: 'UNKNOWN',
+      };
     }
-    
+
+    // Use whichever tokens we found
+    const finalAccessToken = accessTokenCookie || altAccessToken;
+    const finalIdToken = idTokenCookie || altIdToken;
+
+    console.log('[LTK Login] Using access token from:', finalAccessToken?.name || 'NOT FOUND');
+    console.log('[LTK Login] Using id token from:', finalIdToken?.name || 'NOT FOUND');
+
     // Decode URL-encoded tokens
     const accessToken = decodeURIComponent(
-      accessTokenCookie?.value || ''
+      finalAccessToken?.value || ''
     ).replace('Bearer ', '');
-    
+
     const idToken = decodeURIComponent(
-      idTokenCookie?.value || ''
+      finalIdToken?.value || ''
     );
-    
+
     // Calculate expiration (tokens typically last 1 hour)
     // The cookie might have an expiration, or we estimate
-    const expiresAt = accessTokenCookie?.expires 
-      ? Math.floor(accessTokenCookie.expires)
+    const expiresAt = finalAccessToken?.expires
+      ? Math.floor(finalAccessToken.expires)
       : Math.floor(Date.now() / 1000) + 3600; // 1 hour from now
-    
+
     console.log('[LTK Login] Successfully extracted tokens!');
+    console.log('[LTK Login] Access token length:', accessToken.length);
+    console.log('[LTK Login] ID token length:', idToken.length);
     
     return {
       success: true,
