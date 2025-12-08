@@ -271,29 +271,47 @@ export async function loginToLTK(
     console.log('[LTK Login] Auth-related cookies found:', authCookies.map(c => c.name).join(', '));
 
     // Check localStorage and sessionStorage - log ALL keys
-    const allStorage = await page.evaluate(() => {
-      const result: Record<string, string> = {};
+    const storageData = await page.evaluate(() => {
+      const ls: Record<string, string> = {};
+      const ss: Record<string, string> = {};
 
       // Get ALL localStorage keys
-      for (let i = 0; i < localStorage.length; i++) {
-        const key = localStorage.key(i);
-        if (key) {
-          const value = localStorage.getItem(key) || '';
-          result[`localStorage:${key}`] = value.substring(0, 200);
+      try {
+        for (let i = 0; i < window.localStorage.length; i++) {
+          const key = window.localStorage.key(i);
+          if (key) {
+            const value = window.localStorage.getItem(key) || '';
+            ls[key] = value.substring(0, 200);
+          }
         }
+      } catch (e) {
+        // localStorage may not be available
       }
 
       // Get ALL sessionStorage keys
-      for (let i = 0; i < sessionStorage.length; i++) {
-        const key = sessionStorage.key(i);
-        if (key) {
-          const value = sessionStorage.getItem(key) || '';
-          result[`sessionStorage:${key}`] = value.substring(0, 200);
+      try {
+        for (let i = 0; i < window.sessionStorage.length; i++) {
+          const key = window.sessionStorage.key(i);
+          if (key) {
+            const value = window.sessionStorage.getItem(key) || '';
+            ss[key] = value.substring(0, 200);
+          }
         }
+      } catch (e) {
+        // sessionStorage may not be available
       }
 
-      return result;
+      return { localStorage: ls, sessionStorage: ss };
     });
+
+    // Build allStorage from the structured data
+    const allStorage: Record<string, string> = {};
+    for (const [key, value] of Object.entries(storageData.localStorage || {})) {
+      allStorage[`localStorage:${key}`] = value;
+    }
+    for (const [key, value] of Object.entries(storageData.sessionStorage || {})) {
+      allStorage[`sessionStorage:${key}`] = value;
+    }
 
     console.log('[LTK Login] ===== ALL STORAGE (localStorage + sessionStorage) =====');
     console.log('[LTK Login] Total storage items:', Object.keys(allStorage).length);
