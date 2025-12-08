@@ -83,11 +83,10 @@ export async function loginToLTK(
     // Try to find and click login button if on landing page
     const loginButtonSelectors = [
       'a[href*="login"]',
-      'button:has-text("Log in")',
-      'button:has-text("Sign in")',
+      'a[href*="signin"]',
       '[data-testid="login-button"]',
       '.login-button',
-      'a:has-text("Log in")',
+      '.sign-in-button',
     ];
     
     for (const selector of loginButtonSelectors) {
@@ -110,12 +109,13 @@ export async function loginToLTK(
     
     // Auth0 email field selectors
     const emailSelectors = [
+      'input[name="username"]',
       'input[name="email"]',
       'input[type="email"]',
-      'input[id="email"]',
-      'input[name="username"]',
       'input[id="username"]',
-      '#1-email', // Auth0 Lock widget
+      'input[id="email"]',
+      'input[autocomplete="username"]',
+      'input[autocomplete="email"]',
     ];
     
     let emailField = null;
@@ -166,11 +166,10 @@ export async function loginToLTK(
     // Find and click submit button
     const submitSelectors = [
       'button[type="submit"]',
+      'button[name="action"]',
+      'button[data-action-button-primary="true"]',
       'input[type="submit"]',
-      'button:has-text("Log in")',
-      'button:has-text("Sign in")',
-      'button:has-text("Continue")',
-      '.auth0-lock-submit',
+      'button[value="default"]',
     ];
     
     let submitted = false;
