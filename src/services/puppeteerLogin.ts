@@ -23,7 +23,8 @@ export interface LTKLoginOptions {
   headless?: boolean; // Show browser for debugging (default: true)
 }
 
-const LTK_LOGIN_URL = 'https://creator.shopltk.com';
+const LTK_BASE_URL = 'https://creator.shopltk.com';
+const LTK_AUTH_URL = 'https://creator-auth.shopltk.com/login';
 const DEFAULT_TIMEOUT = 60000; // 60 seconds
 
 /**
@@ -63,46 +64,36 @@ export async function loginToLTK(
     );
     
     console.log('[LTK Login] Navigating to LTK...');
-    
-    // Navigate to LTK
-    await page.goto(LTK_LOGIN_URL, {
+
+    // Navigate to LTK base URL - it should redirect to auth page
+    await page.goto(LTK_BASE_URL, {
       waitUntil: 'networkidle2',
       timeout,
     });
-    
-    // Wait a moment for any redirects
+
+    let currentUrl = page.url();
+    console.log('[LTK Login] Initial URL after navigation:', currentUrl);
+
+    // Wait for potential redirect to auth page
     await delay(2000);
-    
-    // Check if we're already on a login page or need to click login
-    const currentUrl = page.url();
-    console.log('[LTK Login] Current URL:', currentUrl);
-    
-    // LTK uses Auth0 - look for their login form
-    // The form might be on the main page or we might need to click a login button
-    
-    // Try to find and click login button if on landing page
-    const loginButtonSelectors = [
-      'a[href*="login"]',
-      'a[href*="signin"]',
-      '[data-testid="login-button"]',
-      '.login-button',
-      '.sign-in-button',
-    ];
-    
-    for (const selector of loginButtonSelectors) {
-      try {
-        const button = await page.$(selector);
-        if (button) {
-          console.log('[LTK Login] Found login button, clicking...');
-          await button.click();
-          await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 10000 }).catch(() => {});
-          await delay(1000);
-          break;
-        }
-      } catch {
-        // Continue trying other selectors
-      }
+    currentUrl = page.url();
+    console.log('[LTK Login] URL after delay:', currentUrl);
+
+    // If not on auth page, navigate directly to it
+    if (!currentUrl.includes('creator-auth.shopltk.com')) {
+      console.log('[LTK Login] Not on auth page, navigating directly to:', LTK_AUTH_URL);
+      await page.goto(LTK_AUTH_URL, {
+        waitUntil: 'networkidle2',
+        timeout,
+      });
+      await delay(2000);
+      currentUrl = page.url();
+      console.log('[LTK Login] URL after direct auth navigation:', currentUrl);
     }
+
+    // Take a screenshot for debugging
+    await page.screenshot({ path: '/tmp/ltk-login-page.png' });
+    console.log('[LTK Login] Screenshot saved to /tmp/ltk-login-page.png');
     
     // Now look for the Auth0 login form
     console.log('[LTK Login] Looking for login form...');
@@ -130,10 +121,12 @@ export async function loginToLTK(
     
     if (!emailField) {
       // Take a screenshot for debugging
-      await page.screenshot({ path: '/tmp/ltk-login-debug.png' });
-      console.log('[LTK Login] Screenshot saved to /tmp/ltk-login-debug.png');
-      
-      throw new Error('Could not find email input field');
+      await page.screenshot({ path: '/tmp/ltk-login-email-not-found.png' });
+      console.log('[LTK Login] Screenshot saved to /tmp/ltk-login-email-not-found.png');
+      console.log('[LTK Login] Current URL:', page.url());
+      console.log('[LTK Login] Page title:', await page.title());
+
+      throw new Error(`Could not find email input field. Current URL: ${page.url()}`);
     }
     
     // Type email
