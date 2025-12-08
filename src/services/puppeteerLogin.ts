@@ -109,6 +109,7 @@ export async function loginToLTK(
     
     // Auth0 email field selectors
     const emailSelectors = [
+      '[data-test-id="login-email-input"]',
       'input[name="username"]',
       'input[name="email"]',
       'input[type="email"]',
@@ -141,6 +142,7 @@ export async function loginToLTK(
     
     // Find password field
     const passwordSelectors = [
+      '[data-test-id="login-password-input"]',
       'input[name="password"]',
       'input[type="password"]',
       'input[id="password"]',
@@ -165,6 +167,7 @@ export async function loginToLTK(
     
     // Find and click submit button
     const submitSelectors = [
+      '[data-test-id="login-submit-btn"]',
       'button[type="submit"]',
       'button[name="action"]',
       'button[data-action-button-primary="true"]',
