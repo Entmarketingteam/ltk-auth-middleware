@@ -43,7 +43,7 @@ export async function loginToLTK(
     console.log('[LTK Login] Starting Puppeteer...');
     
     browser = await puppeteer.launch({
-      headless: headless ? 'new' : false,
+      headless: true,
       args: [
         '--no-sandbox',
         '--disable-setuid-sandbox',
