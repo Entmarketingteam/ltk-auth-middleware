@@ -7,6 +7,6 @@
  * - POST /refresh/:userId - Manually refresh tokens
  * - DELETE /disconnect/:userId - Remove connection
  */
-declare const router: any;
+declare const router: import("express-serve-static-core").Router;
 export default router;
 //# sourceMappingURL=ltkAuth.d.ts.map

@@ -8,6 +8,7 @@ export interface LTKTokens {
     accessToken: string;
     idToken: string;
     expiresAt: number;
+    publisherId?: string;
 }
 export interface ConnectionStatus {
     connected: boolean;
