@@ -121,7 +121,7 @@ router.get('/earnings/:userId', async (req: Request, res: Response) => {
       throw new Error(`Failed to get creator info: ${meResponse.status}`);
     }
 
-    const creatorData = await meResponse.json();
+    const creatorData = await meResponse.json() as any;
     const creatorId = creatorData.id || creatorData.creator_id || creatorData.data?.id;
 
     console.log('[LTK Earnings] Creator ID:', creatorId);
@@ -145,7 +145,7 @@ router.get('/earnings/:userId', async (req: Request, res: Response) => {
       throw new Error(`Failed to fetch earnings: ${earningsResponse.status}`);
     }
 
-    const earningsData = await earningsResponse.json();
+    const earningsData = await earningsResponse.json() as any;
     console.log('[LTK Earnings] Raw earnings data keys:', Object.keys(earningsData));
 
     // 5. Also try to get post analytics for more detail
@@ -157,7 +157,7 @@ router.get('/earnings/:userId', async (req: Request, res: Response) => {
       });
 
       if (postsResponse.ok) {
-        const postsData = await postsResponse.json();
+        const postsData = await postsResponse.json() as any;
         postAnalytics = postsData.data || postsData.posts || postsData || [];
         console.log('[LTK Earnings] Got post analytics:', postAnalytics.length, 'items');
       }
@@ -243,7 +243,7 @@ router.get('/analytics/:userId', async (req: Request, res: Response) => {
       throw new Error('Failed to get creator info');
     }
 
-    const creatorData = await meResponse.json();
+    const creatorData = await meResponse.json() as any;
     const creatorId = creatorData.id || creatorData.creator_id || creatorData.data?.id;
 
     // Fetch requested analytics type
@@ -269,7 +269,7 @@ router.get('/analytics/:userId', async (req: Request, res: Response) => {
       throw new Error(`Failed to fetch ${analyticsType} analytics`);
     }
 
-    const data = await response.json();
+    const data = await response.json() as any;
 
     res.json({
       success: true,
