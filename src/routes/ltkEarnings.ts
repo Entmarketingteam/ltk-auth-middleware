@@ -765,4 +765,445 @@ router.get('/hero-chart/:userId', async (req: Request, res: Response) => {
   }
 });
 
+/**
+ * GET /api/ltk/performance-summary/:userId
+ * Aggregate metrics (clicks, orders, items_sold, net_commissions) for date range
+ */
+router.get('/performance-summary/:userId', async (req: Request, res: Response) => {
+  const { userId } = req.params;
+  const { startDate, endDate, currency } = req.query;
+
+  const end = (endDate as string) || new Date().toISOString();
+  const start = (startDate as string) || new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+  const currencyCode = (currency as string) || 'USD';
+
+  console.log(`[LTK Performance Summary] Fetching for user ${userId}`);
+
+  try {
+    const tokens = await getTokens(userId);
+    if (!tokens) {
+      return res.status(401).json({
+        success: false,
+        error: 'LTK not connected',
+      });
+    }
+
+    const { accessToken, idToken, publisherId } = tokens;
+
+    if (!idToken) {
+      return res.status(401).json({
+        success: false,
+        error: 'ID token required',
+        needsReauth: true,
+      });
+    }
+
+    const url = `${LTK_API_BASE}/api/creator-analytics/v1/performance_summary?start_date=${encodeURIComponent(start)}&end_date=${encodeURIComponent(end)}&currency=${currencyCode}&platform=rs,ltk&timezone=UTC${publisherId ? `&publisher_ids=${publisherId}` : ''}`;
+
+    const result = await fetchLTKApi(url, accessToken, idToken);
+
+    if (result.error) {
+      if (result.status === 401) {
+        return res.status(401).json({
+          success: false,
+          error: 'Token expired',
+          needsReauth: true,
+        });
+      }
+      throw new Error(`Failed to fetch performance summary: ${result.status} ${result.statusText}`);
+    }
+
+    res.json({
+      success: true,
+      performanceSummary: result.data?.data || result.data,
+      meta: result.data?.meta,
+      period: { start, end },
+      currency: currencyCode,
+      publisherId,
+    });
+
+  } catch (error: any) {
+    console.error('[LTK Performance Summary] Error:', error.message);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
+/**
+ * GET /api/ltk/performance-stats/:userId
+ * Creator-level stats snapshot (followers, visits, video views, etc.)
+ */
+router.get('/performance-stats/:userId', async (req: Request, res: Response) => {
+  const { userId } = req.params;
+  const { currency } = req.query;
+
+  const currencyCode = (currency as string) || 'USD';
+
+  console.log(`[LTK Performance Stats] Fetching for user ${userId}`);
+
+  try {
+    const tokens = await getTokens(userId);
+    if (!tokens) {
+      return res.status(401).json({
+        success: false,
+        error: 'LTK not connected',
+      });
+    }
+
+    const { accessToken, idToken, publisherId } = tokens;
+
+    if (!idToken) {
+      return res.status(401).json({
+        success: false,
+        error: 'ID token required',
+        needsReauth: true,
+      });
+    }
+
+    const url = `${LTK_API_BASE}/api/creator-analytics/v1/performance_stats?currency=${currencyCode}${publisherId ? `&publisher_ids=${publisherId}` : ''}`;
+
+    const result = await fetchLTKApi(url, accessToken, idToken);
+
+    if (result.error) {
+      if (result.status === 401) {
+        return res.status(401).json({
+          success: false,
+          error: 'Token expired',
+          needsReauth: true,
+        });
+      }
+      throw new Error(`Failed to fetch performance stats: ${result.status} ${result.statusText}`);
+    }
+
+    res.json({
+      success: true,
+      performanceStats: result.data?.performance_stats || result.data,
+      meta: result.data?.meta,
+      currency: currencyCode,
+      publisherId,
+    });
+
+  } catch (error: any) {
+    console.error('[LTK Performance Stats] Error:', error.message);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
+/**
+ * GET /api/ltk/user-info/:userId
+ * Legacy consultant info + social URLs + push settings
+ */
+router.get('/user-info/:userId', async (req: Request, res: Response) => {
+  const { userId } = req.params;
+
+  console.log(`[LTK User Info] Fetching for user ${userId}`);
+
+  try {
+    const tokens = await getTokens(userId);
+    if (!tokens) {
+      return res.status(401).json({
+        success: false,
+        error: 'LTK not connected',
+      });
+    }
+
+    const { accessToken, idToken, publisherId } = tokens;
+
+    if (!idToken) {
+      return res.status(401).json({
+        success: false,
+        error: 'ID token required',
+        needsReauth: true,
+      });
+    }
+
+    const url = `${LTK_API_BASE}/api/co-api/v1/get_user_info`;
+
+    const result = await fetchLTKApi(url, accessToken, idToken);
+
+    if (result.error) {
+      if (result.status === 401) {
+        return res.status(401).json({
+          success: false,
+          error: 'Token expired',
+          needsReauth: true,
+        });
+      }
+      throw new Error(`Failed to fetch user info: ${result.status} ${result.statusText}`);
+    }
+
+    res.json({
+      success: true,
+      userInfo: result.data,
+      publisherId,
+    });
+
+  } catch (error: any) {
+    console.error('[LTK User Info] Error:', error.message);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
+/**
+ * GET /api/ltk/amazon-identities/:userId
+ * Amazon influencer IDs, tags & channel flags
+ */
+router.get('/amazon-identities/:userId', async (req: Request, res: Response) => {
+  const { userId } = req.params;
+
+  console.log(`[LTK Amazon Identities] Fetching for user ${userId}`);
+
+  try {
+    const tokens = await getTokens(userId);
+    if (!tokens) {
+      return res.status(401).json({
+        success: false,
+        error: 'LTK not connected',
+      });
+    }
+
+    const { accessToken, idToken, publisherId } = tokens;
+
+    if (!idToken) {
+      return res.status(401).json({
+        success: false,
+        error: 'ID token required',
+        needsReauth: true,
+      });
+    }
+
+    const url = `${LTK_API_BASE}/api/co-api/v1/get_amazon_identities`;
+
+    const result = await fetchLTKApi(url, accessToken, idToken);
+
+    if (result.error) {
+      if (result.status === 401) {
+        return res.status(401).json({
+          success: false,
+          error: 'Token expired',
+          needsReauth: true,
+        });
+      }
+      throw new Error(`Failed to fetch amazon identities: ${result.status} ${result.statusText}`);
+    }
+
+    res.json({
+      success: true,
+      amazonIdentities: result.data?.amazon_identities || result.data,
+      meta: result.data?.meta,
+      publisherId,
+    });
+
+  } catch (error: any) {
+    console.error('[LTK Amazon Identities] Error:', error.message);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
+/**
+ * GET /api/ltk/profiles/:userId
+ * Public LTK profile info (bio, avatar, body classification, etc.)
+ */
+router.get('/profiles/:userId', async (req: Request, res: Response) => {
+  const { userId } = req.params;
+
+  console.log(`[LTK Profiles] Fetching for user ${userId}`);
+
+  try {
+    const tokens = await getTokens(userId);
+    if (!tokens) {
+      return res.status(401).json({
+        success: false,
+        error: 'LTK not connected',
+      });
+    }
+
+    const { accessToken, idToken, publisherId } = tokens;
+
+    if (!idToken) {
+      return res.status(401).json({
+        success: false,
+        error: 'ID token required',
+        needsReauth: true,
+      });
+    }
+
+    // Get profile by publisher ID
+    const url = `${LTK_API_BASE}/api/pub/v2/profiles/${publisherId ? `?rs_account_ids=${publisherId}` : ''}`;
+
+    const result = await fetchLTKApi(url, accessToken, idToken);
+
+    if (result.error) {
+      if (result.status === 401) {
+        return res.status(401).json({
+          success: false,
+          error: 'Token expired',
+          needsReauth: true,
+        });
+      }
+      throw new Error(`Failed to fetch profiles: ${result.status} ${result.statusText}`);
+    }
+
+    res.json({
+      success: true,
+      profiles: result.data?.profiles || result.data,
+      publisherId,
+    });
+
+  } catch (error: any) {
+    console.error('[LTK Profiles] Error:', error.message);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
+/**
+ * GET /api/ltk/search-trends/:userId
+ * Trending search queries inside LTK
+ */
+router.get('/search-trends/:userId', async (req: Request, res: Response) => {
+  const { userId } = req.params;
+
+  console.log(`[LTK Search Trends] Fetching for user ${userId}`);
+
+  try {
+    const tokens = await getTokens(userId);
+    if (!tokens) {
+      return res.status(401).json({
+        success: false,
+        error: 'LTK not connected',
+      });
+    }
+
+    const { accessToken, idToken, publisherId } = tokens;
+
+    if (!idToken) {
+      return res.status(401).json({
+        success: false,
+        error: 'ID token required',
+        needsReauth: true,
+      });
+    }
+
+    const url = `${LTK_API_BASE}/api/ltk/v2/ltk_search_trends/`;
+
+    const result = await fetchLTKApi(url, accessToken, idToken);
+
+    if (result.error) {
+      if (result.status === 401) {
+        return res.status(401).json({
+          success: false,
+          error: 'Token expired',
+          needsReauth: true,
+        });
+      }
+      throw new Error(`Failed to fetch search trends: ${result.status} ${result.statusText}`);
+    }
+
+    res.json({
+      success: true,
+      searchTrends: result.data?.ltk_search_trends || result.data,
+      publisherId,
+    });
+
+  } catch (error: any) {
+    console.error('[LTK Search Trends] Error:', error.message);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
+/**
+ * GET /api/ltk/all-data/:userId
+ * Fetch ALL available data in one call (for comprehensive sync)
+ */
+router.get('/all-data/:userId', async (req: Request, res: Response) => {
+  const { userId } = req.params;
+  const { startDate, endDate, currency } = req.query;
+
+  const end = (endDate as string) || new Date().toISOString();
+  const start = (startDate as string) || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+  const currencyCode = (currency as string) || 'USD';
+
+  console.log(`[LTK All Data] Fetching comprehensive data for user ${userId}`);
+
+  try {
+    const tokens = await getTokens(userId);
+    if (!tokens) {
+      return res.status(401).json({
+        success: false,
+        error: 'LTK not connected',
+      });
+    }
+
+    const { accessToken, idToken, publisherId } = tokens;
+
+    if (!idToken) {
+      return res.status(401).json({
+        success: false,
+        error: 'ID token required',
+        needsReauth: true,
+      });
+    }
+
+    // Fetch all endpoints in parallel
+    const [
+      commissionsSummary,
+      performanceSummary,
+      performanceStats,
+      itemsSold,
+      userInfo,
+    ] = await Promise.all([
+      fetchLTKApi(`${LTK_API_BASE}/api/creator-analytics/v1/commissions_summary?currency=${currencyCode}`, accessToken, idToken),
+      fetchLTKApi(`${LTK_API_BASE}/api/creator-analytics/v1/performance_summary?start_date=${encodeURIComponent(start)}&end_date=${encodeURIComponent(end)}&currency=${currencyCode}&platform=rs,ltk&timezone=UTC${publisherId ? `&publisher_ids=${publisherId}` : ''}`, accessToken, idToken),
+      fetchLTKApi(`${LTK_API_BASE}/api/creator-analytics/v1/performance_stats?currency=${currencyCode}`, accessToken, idToken),
+      fetchLTKApi(`${LTK_API_BASE}/api/creator-analytics/v1/items_sold/?limit=100&start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}&currency=${currencyCode}`, accessToken, idToken),
+      fetchLTKApi(`${LTK_API_BASE}/api/co-api/v1/get_user_info`, accessToken, idToken),
+    ]);
+
+    res.json({
+      success: true,
+      data: {
+        commissionsSummary: commissionsSummary.error ? null : commissionsSummary.data,
+        performanceSummary: performanceSummary.error ? null : performanceSummary.data,
+        performanceStats: performanceStats.error ? null : performanceStats.data,
+        itemsSold: itemsSold.error ? null : (itemsSold.data?.items_sold || itemsSold.data),
+        userInfo: userInfo.error ? null : userInfo.data,
+      },
+      errors: {
+        commissionsSummary: commissionsSummary.error ? commissionsSummary.body : null,
+        performanceSummary: performanceSummary.error ? performanceSummary.body : null,
+        performanceStats: performanceStats.error ? performanceStats.body : null,
+        itemsSold: itemsSold.error ? itemsSold.body : null,
+        userInfo: userInfo.error ? userInfo.body : null,
+      },
+      period: { start, end },
+      currency: currencyCode,
+      publisherId,
+    });
+
+  } catch (error: any) {
+    console.error('[LTK All Data] Error:', error.message);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
 export default router;
