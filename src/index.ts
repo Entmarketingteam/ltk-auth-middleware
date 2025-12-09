@@ -14,6 +14,7 @@ import helmet from 'helmet';
 
 import ltkAuthRoutes from './routes/ltkAuth.js';
 import ltkProxyRoutes from './routes/ltkProxy.js';
+import ltkEarningsRoutes from './routes/ltkEarnings.js';
 import { startTokenRefreshJob } from './services/tokenRefresh.js';
 
 const app = express();
@@ -53,6 +54,9 @@ app.get('/health', (req, res) => {
 // LTK Authentication routes (connect/disconnect)
 app.use('/api/ltk', ltkAuthRoutes);
 
+// LTK Earnings/Analytics routes
+app.use('/api/ltk', ltkEarningsRoutes);
+
 // LTK API Proxy routes
 app.use('/api/ltk', ltkProxyRoutes);
 
@@ -76,20 +80,22 @@ app.use((err: Error, req: express.Request, res: express.Response, next: express.
 // Start server
 app.listen(PORT, () => {
   console.log(`
-╔═══════════════════════════════════════════════════════════╗
-║                                                           ║
-║   🔐 LTK Auth Middleware                                  ║
-║                                                           ║
-║   Server running on port ${PORT}                            ║
-║                                                           ║
-║   Endpoints:                                              ║
-║   • POST /api/ltk/connect        Connect LTK account      ║
-║   • GET  /api/ltk/status/:userId Check connection         ║
-║   • POST /api/ltk/refresh/:userId Refresh tokens          ║
-║   • DELETE /api/ltk/disconnect/:userId Disconnect         ║
-║   • GET  /api/ltk/*             Proxy to LTK API          ║
-║                                                           ║
-╚═══════════════════════════════════════════════════════════╝
+╔═══════════════════════════════════════════════════════════════╗
+║                                                               ║
+║   🔐 LTK Auth Middleware                                      ║
+║                                                               ║
+║   Server running on port ${PORT}                                ║
+║                                                               ║
+║   Endpoints:                                                  ║
+║   • POST /api/ltk/connect          Connect LTK account        ║
+║   • GET  /api/ltk/status/:userId   Check connection           ║
+║   • POST /api/ltk/refresh/:userId  Refresh tokens             ║
+║   • DELETE /api/ltk/disconnect/:userId  Disconnect            ║
+║   • GET  /api/ltk/earnings/:userId Fetch LTK earnings         ║
+║   • GET  /api/ltk/analytics/:userId Fetch LTK analytics       ║
+║   • GET  /api/ltk/*                Proxy to LTK API           ║
+║                                                               ║
+╚═══════════════════════════════════════════════════════════════╝
   `);
   
   // Start background token refresh job
