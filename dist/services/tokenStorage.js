@@ -15,6 +15,40 @@ exports.disconnectLTK = disconnectLTK;
 exports.getConnectionsNeedingRefresh = getConnectionsNeedingRefresh;
 const supabase_js_1 = require("@supabase/supabase-js");
 const encryption_js_1 = require("../utils/encryption.js");
+/**
+ * Parse JWT to extract payload (without verification)
+ */
+function parseJwtPayload(token) {
+    try {
+        const parts = token.split('.');
+        if (parts.length !== 3)
+            return null;
+        const payload = Buffer.from(parts[1], 'base64').toString('utf8');
+        return JSON.parse(payload);
+    }
+    catch {
+        return null;
+    }
+}
+/**
+ * Extract publisher_id from idToken JWT claims
+ */
+function extractPublisherId(idToken) {
+    const payload = parseJwtPayload(idToken);
+    if (!payload)
+        return null;
+    // LTK stores publisher info in http://shopltk.com/profile claim
+    const profile = payload['http://shopltk.com/profile'];
+    if (profile?.publisher_id) {
+        return String(profile.publisher_id);
+    }
+    // Fallback: check other common claim names
+    if (payload['publisher_id'])
+        return String(payload['publisher_id']);
+    if (payload['pub_id'])
+        return String(payload['pub_id']);
+    return null;
+}
 let supabase = null;
 /**
  * Get Supabase client (singleton)
@@ -38,6 +72,9 @@ async function storeTokens(userId, tokens) {
     // Encrypt tokens
     const encryptedAccessToken = (0, encryption_js_1.encryptToken)(tokens.accessToken);
     const encryptedIdToken = (0, encryption_js_1.encryptToken)(tokens.idToken);
+    // Extract publisherId from idToken JWT
+    const publisherId = tokens.publisherId || extractPublisherId(tokens.idToken);
+    console.log(`[Token Storage] Extracted publisher_id: ${publisherId}`);
     // Check if connection already exists
     const { data: existing } = await db
         .from('platform_connections')
@@ -56,6 +93,7 @@ async function storeTokens(userId, tokens) {
         last_refresh_at: new Date().toISOString(),
         refresh_error: null,
         updated_at: new Date().toISOString(),
+        metadata: { publisher_id: publisherId },
     };
     if (existing) {
         // Update existing connection
@@ -74,13 +112,12 @@ async function storeTokens(userId, tokens) {
             .insert({
             ...connectionData,
             created_at: new Date().toISOString(),
-            metadata: {},
         });
         if (error) {
             throw new Error(`Failed to create connection: ${error.message}`);
         }
     }
-    console.log(`[Token Storage] Stored encrypted tokens for user ${userId}`);
+    console.log(`[Token Storage] Stored encrypted tokens for user ${userId} (publisher: ${publisherId})`);
 }
 /**
  * Retrieve LTK tokens for a user (decrypted)
@@ -107,7 +144,14 @@ async function getTokens(userId) {
         const expiresAt = connection.token_expires_at
             ? Math.floor(new Date(connection.token_expires_at).getTime() / 1000)
             : 0;
-        return { accessToken, idToken, expiresAt };
+        // Get publisherId from metadata or extract from idToken
+        const metadata = connection.metadata;
+        let publisherId = metadata?.publisher_id;
+        // Fallback: extract from idToken if not in metadata
+        if (!publisherId) {
+            publisherId = extractPublisherId(idToken) || undefined;
+        }
+        return { accessToken, idToken, expiresAt, publisherId };
     }
     catch (decryptError) {
         console.error(`[Token Storage] Failed to decrypt tokens for user ${userId}:`, decryptError);

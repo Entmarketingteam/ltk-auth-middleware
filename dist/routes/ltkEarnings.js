@@ -2,34 +2,41 @@
 /**
  * LTK Earnings Route
  *
- * Fetches earnings/analytics data from LTK API using stored tokens.
- * Uses the real LTK Creator API endpoints.
+ * Fetches earnings/analytics data from LTK using the rewardstyle API gateway.
+ * Uses direct fetch since api-gateway.rewardstyle.com resolves publicly.
  */
-var __importDefault = (this && this.__importDefault) || function (mod) {
-    return (mod && mod.__esModule) ? mod : { "default": mod };
-};
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
-const node_fetch_1 = __importDefault(require("node-fetch"));
 const tokenStorage_js_1 = require("../services/tokenStorage.js");
 const router = (0, express_1.Router)();
-// LTK API Base URL - use the gateway endpoint that the tokens are scoped to
-const LTK_API_BASE = 'https://creator-api-gateway.shopltk.com';
+// LTK API Base URL - the actual working endpoint discovered from browser DevTools
+const LTK_API_BASE = 'https://api-gateway.rewardstyle.com';
 /**
- * Get browser-like headers for LTK API requests
+ * Make API call to LTK/Rewardstyle API with proper headers
  */
-function getLTKHeaders(accessToken) {
-    return {
-        'Authorization': `Bearer ${accessToken}`,
-        'Content-Type': 'application/json',
-        'Accept': 'application/json',
-        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Origin': 'https://creator.shopltk.com',
-        'Referer': 'https://creator.shopltk.com/',
-        'Accept-Language': 'en-US,en;q=0.9',
-        'Cache-Control': 'no-cache',
-        'Pragma': 'no-cache',
-    };
+async function fetchLTKApi(url, accessToken, idToken) {
+    console.log('[LTK API] Fetching:', url);
+    const response = await fetch(url, {
+        method: 'GET',
+        headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'x-id-token': idToken,
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+        },
+    });
+    console.log('[LTK API] Response status:', response.status);
+    if (!response.ok) {
+        const text = await response.text();
+        return {
+            error: true,
+            status: response.status,
+            statusText: response.statusText,
+            body: text
+        };
+    }
+    const data = await response.json();
+    return { error: false, data };
 }
 /**
  * GET /api/ltk/earnings/:userId
@@ -60,96 +67,70 @@ router.get('/earnings/:userId', async (req, res) => {
                 error: 'No valid tokens found',
             });
         }
-        const { accessToken } = tokens;
-        // 3. First get creator info to get creator_id
-        console.log('[LTK Earnings] Fetching creator info...');
-        const headers = getLTKHeaders(accessToken);
-        const creatorUrl = `${LTK_API_BASE}/v1/creator/me`;
-        console.log('[LTK Earnings] Calling:', creatorUrl);
+        const { accessToken, idToken, publisherId } = tokens;
         console.log('[LTK Earnings] Token prefix:', accessToken.substring(0, 50) + '...');
-        let meResponse;
-        try {
-            meResponse = await (0, node_fetch_1.default)(creatorUrl, {
-                headers,
+        console.log('[LTK Earnings] Publisher ID:', publisherId);
+        if (!idToken) {
+            return res.status(401).json({
+                success: false,
+                error: 'ID token required for LTK API calls',
+                needsReauth: true,
             });
         }
-        catch (fetchError) {
-            console.error('[LTK Earnings] Fetch error details:', {
-                message: fetchError.message,
-                cause: fetchError.cause,
-                code: fetchError.code,
-                errno: fetchError.errno,
-                syscall: fetchError.syscall,
-                hostname: fetchError.hostname,
-                stack: fetchError.stack?.split('\n').slice(0, 3).join('\n'),
+        if (!publisherId) {
+            return res.status(400).json({
+                success: false,
+                error: 'Publisher ID not found. Please reconnect your LTK account.',
+                needsReauth: true,
             });
-            throw new Error(`Network error calling LTK API: ${fetchError.message} (${fetchError.cause?.message || fetchError.code || 'unknown'})`);
         }
-        if (!meResponse.ok) {
-            const errorText = await meResponse.text();
-            console.error('[LTK Earnings] Failed to get creator info:', meResponse.status, errorText);
-            if (meResponse.status === 401) {
+        // Format dates for API (ISO format with time)
+        const startDateTime = `${start}T00:00:00Z`;
+        const endDateTime = `${end}T23:59:59Z`;
+        // 3. Fetch hero chart data (summary stats)
+        console.log('[LTK Earnings] Fetching hero chart data...');
+        const heroUrl = `${LTK_API_BASE}/analytics/hero_chart?start_date=${encodeURIComponent(startDateTime)}&end_date=${encodeURIComponent(endDateTime)}&publisher_ids=${publisherId}&interval=day&platform=rs,ltk&timezone=UTC`;
+        const heroResult = await fetchLTKApi(heroUrl, accessToken, idToken);
+        if (heroResult.error) {
+            console.error('[LTK Earnings] Failed to fetch hero chart:', heroResult);
+            if (heroResult.status === 401) {
                 return res.status(401).json({
                     success: false,
                     error: 'Token expired or invalid',
                     needsReauth: true,
                 });
             }
-            throw new Error(`Failed to get creator info: ${meResponse.status}`);
+            throw new Error(`Failed to fetch earnings: ${heroResult.status} ${heroResult.statusText}`);
         }
-        const creatorData = await meResponse.json();
-        const creatorId = creatorData.id || creatorData.creator_id || creatorData.data?.id;
-        console.log('[LTK Earnings] Creator ID:', creatorId);
-        if (!creatorId) {
-            console.error('[LTK Earnings] Creator data:', JSON.stringify(creatorData));
-            throw new Error('Could not determine creator ID from response');
+        const heroData = heroResult.data;
+        console.log('[LTK Earnings] Hero data:', JSON.stringify(heroData).substring(0, 200));
+        // 4. Fetch top performers/links data for detailed breakdown
+        console.log('[LTK Earnings] Fetching top performers...');
+        const topPerformersUrl = `${LTK_API_BASE}/analytics/top_performers/links?start_date=${encodeURIComponent(startDateTime)}&end_date=${encodeURIComponent(endDateTime)}&publisher_ids=${publisherId}&platform=rs,ltk&timezone=UTC&limit=50`;
+        const topPerformersResult = await fetchLTKApi(topPerformersUrl, accessToken, idToken);
+        let earnings = [];
+        if (!topPerformersResult.error && topPerformersResult.data) {
+            const performersData = topPerformersResult.data.data || topPerformersResult.data || [];
+            earnings = (Array.isArray(performersData) ? performersData : []).map((item) => ({
+                date: item.date || item.created_at || start,
+                product: item.product_name || item.link_name || item.title || 'Unknown Product',
+                brand: item.brand_name || item.retailer || item.merchant || 'Unknown Brand',
+                commission: String(item.commissions || item.commission || item.earnings || '0'),
+                orderValue: String(item.order_value || item.gmv || item.revenue || '0'),
+                status: item.status || 'COMPLETED',
+                clicks: item.clicks || 0,
+                orders: item.orders || item.conversions || 0,
+            }));
         }
-        // 4. Fetch earnings data
-        console.log('[LTK Earnings] Fetching earnings data...');
-        const earningsUrl = `${LTK_API_BASE}/v1/analytics/earnings?creator_id=${creatorId}&start_date=${start}&end_date=${end}`;
-        const earningsResponse = await (0, node_fetch_1.default)(earningsUrl, {
-            headers,
-        });
-        if (!earningsResponse.ok) {
-            const errorText = await earningsResponse.text();
-            console.error('[LTK Earnings] Failed to fetch earnings:', earningsResponse.status, errorText);
-            throw new Error(`Failed to fetch earnings: ${earningsResponse.status}`);
-        }
-        const earningsData = await earningsResponse.json();
-        console.log('[LTK Earnings] Raw earnings data keys:', Object.keys(earningsData));
-        // 5. Also try to get post analytics for more detail
-        let postAnalytics = [];
-        try {
-            const postsUrl = `${LTK_API_BASE}/v1/analytics/posts?creator_id=${creatorId}&start_date=${start}&end_date=${end}`;
-            const postsResponse = await (0, node_fetch_1.default)(postsUrl, {
-                headers,
-            });
-            if (postsResponse.ok) {
-                const postsData = await postsResponse.json();
-                postAnalytics = postsData.data || postsData.posts || postsData || [];
-                console.log('[LTK Earnings] Got post analytics:', postAnalytics.length, 'items');
-            }
-        }
-        catch (e) {
-            console.log('[LTK Earnings] Could not fetch post analytics (non-fatal)');
-        }
-        // 6. Transform earnings data
-        const rawEarnings = earningsData.data || earningsData.earnings || earningsData || [];
-        const earnings = (Array.isArray(rawEarnings) ? rawEarnings : []).map((item) => ({
-            date: item.date || item.sale_date || item.created_at || item.order_date || new Date().toISOString(),
-            product: item.product_name || item.product || item.item_name || item.title || 'Unknown Product',
-            brand: item.brand_name || item.brand || item.retailer || item.merchant || 'Unknown Brand',
-            commission: String(item.commission || item.commission_amount || item.earnings || item.payout || '0'),
-            orderValue: String(item.order_value || item.sale_amount || item.gmv || item.revenue || '0'),
-            status: item.status || item.payment_status || 'PENDING',
-            clicks: item.clicks || item.click_count || 0,
-            orders: item.orders || item.order_count || item.conversions || 0,
-        }));
-        // 7. Calculate summary
+        // 5. Build summary from hero chart data
+        const aggregatedData = heroData?.aggregated || heroData || {};
         const summary = {
-            totalEarnings: earnings.reduce((sum, e) => sum + parseFloat(e.commission || '0'), 0).toFixed(2),
-            totalOrders: earnings.reduce((sum, e) => sum + (e.orders || 0), 0),
-            totalClicks: earnings.reduce((sum, e) => sum + (e.clicks || 0), 0),
+            totalEarnings: aggregatedData.commissions?.toFixed(2) || '0.00',
+            totalOrders: aggregatedData.orders || 0,
+            totalClicks: aggregatedData.clicks || 0,
+            itemsSold: aggregatedData.items_sold || 0,
+            conversionRate: aggregatedData.conversion_rate?.toFixed(2) || '0.00',
+            averageOrderValue: aggregatedData.average_order_value?.toFixed(2) || '0.00',
             itemCount: earnings.length,
         };
         console.log('[LTK Earnings] Returning', earnings.length, 'earnings items');
@@ -158,8 +139,8 @@ router.get('/earnings/:userId', async (req, res) => {
             earnings,
             summary,
             period: { start, end },
-            creatorId,
-            postAnalytics: postAnalytics.slice(0, 10), // Include some post data
+            publisherId,
+            rawHeroData: heroData, // Include raw data for debugging
         });
     }
     catch (error) {
@@ -179,7 +160,7 @@ router.get('/analytics/:userId', async (req, res) => {
     const { startDate, endDate, type } = req.query;
     const end = endDate || new Date().toISOString().split('T')[0];
     const start = startDate || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-    const analyticsType = type || 'posts'; // posts, brands, earnings
+    const analyticsType = type || 'hero_chart';
     console.log(`[LTK Analytics] Fetching ${analyticsType} analytics for user ${userId}`);
     try {
         // Get tokens
@@ -190,44 +171,59 @@ router.get('/analytics/:userId', async (req, res) => {
                 error: 'LTK not connected',
             });
         }
-        const { accessToken } = tokens;
-        const headers = getLTKHeaders(accessToken);
-        // Get creator ID
-        const meResponse = await (0, node_fetch_1.default)(`${LTK_API_BASE}/v1/creator/me`, {
-            headers,
-        });
-        if (!meResponse.ok) {
-            throw new Error('Failed to get creator info');
+        const { accessToken, idToken, publisherId } = tokens;
+        if (!idToken) {
+            return res.status(401).json({
+                success: false,
+                error: 'ID token required',
+                needsReauth: true,
+            });
         }
-        const creatorData = await meResponse.json();
-        const creatorId = creatorData.id || creatorData.creator_id || creatorData.data?.id;
-        // Fetch requested analytics type
+        if (!publisherId) {
+            return res.status(400).json({
+                success: false,
+                error: 'Publisher ID not found. Please reconnect your LTK account.',
+                needsReauth: true,
+            });
+        }
+        // Format dates
+        const startDateTime = `${start}T00:00:00Z`;
+        const endDateTime = `${end}T23:59:59Z`;
+        // Build endpoint URL based on type
         let endpoint;
         switch (analyticsType) {
-            case 'brands':
-                endpoint = `${LTK_API_BASE}/v1/analytics/brands?creator_id=${creatorId}&start_date=${start}&end_date=${end}`;
+            case 'top_performers':
+            case 'links':
+                endpoint = `${LTK_API_BASE}/analytics/top_performers/links?start_date=${encodeURIComponent(startDateTime)}&end_date=${encodeURIComponent(endDateTime)}&publisher_ids=${publisherId}&platform=rs,ltk&timezone=UTC&limit=50`;
                 break;
-            case 'earnings':
-                endpoint = `${LTK_API_BASE}/v1/analytics/earnings?creator_id=${creatorId}&start_date=${start}&end_date=${end}`;
+            case 'performance_summary':
+                endpoint = `${LTK_API_BASE}/analytics/performance_summary?start_date=${encodeURIComponent(startDateTime)}&end_date=${encodeURIComponent(endDateTime)}&publisher_ids=${publisherId}&platform=rs,ltk&timezone=UTC`;
                 break;
-            case 'posts':
+            case 'contributors':
+                endpoint = `${LTK_API_BASE}/analytics/contributors?start_date=${encodeURIComponent(startDateTime)}&end_date=${encodeURIComponent(endDateTime)}&publisher_ids=${publisherId}&platform=rs,ltk&timezone=UTC`;
+                break;
+            case 'hero_chart':
             default:
-                endpoint = `${LTK_API_BASE}/v1/analytics/posts?creator_id=${creatorId}&start_date=${start}&end_date=${end}`;
+                endpoint = `${LTK_API_BASE}/analytics/hero_chart?start_date=${encodeURIComponent(startDateTime)}&end_date=${encodeURIComponent(endDateTime)}&publisher_ids=${publisherId}&interval=day&platform=rs,ltk&timezone=UTC`;
                 break;
         }
-        const response = await (0, node_fetch_1.default)(endpoint, {
-            headers,
-        });
-        if (!response.ok) {
-            throw new Error(`Failed to fetch ${analyticsType} analytics`);
+        const result = await fetchLTKApi(endpoint, accessToken, idToken);
+        if (result.error) {
+            if (result.status === 401) {
+                return res.status(401).json({
+                    success: false,
+                    error: 'Token expired',
+                    needsReauth: true,
+                });
+            }
+            throw new Error(`Failed to fetch ${analyticsType} analytics: ${result.status}`);
         }
-        const data = await response.json();
         res.json({
             success: true,
             type: analyticsType,
-            data: data.data || data,
+            data: result.data?.data || result.data,
             period: { start, end },
-            creatorId,
+            publisherId,
         });
     }
     catch (error) {
