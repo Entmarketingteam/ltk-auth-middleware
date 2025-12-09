@@ -1,14 +1,12 @@
 /**
  * LTK Earnings Route
  *
- * Fetches earnings/analytics data from LTK API using stored tokens.
- * Uses the real LTK Creator API endpoints.
+ * Fetches earnings/analytics data from LTK using Puppeteer.
+ * Uses browser-based fetch since LTK API domains don't resolve publicly.
  */
 
 import { Router, Request, Response as ExpressResponse } from 'express';
-import fetch from 'node-fetch';
-import https from 'https';
-import dns from 'dns';
+import puppeteer from 'puppeteer';
 import { getTokens, getConnectionStatus } from '../services/tokenStorage.js';
 
 // Type alias for Express Response
@@ -16,53 +14,8 @@ type Response = ExpressResponse;
 
 const router = Router();
 
-// LTK API Base URL - use the gateway endpoint that the tokens are scoped to
+// LTK API Base URL
 const LTK_API_BASE = 'https://creator-api-gateway.shopltk.com';
-
-// Custom HTTPS agent with Google DNS lookup to fix Railway container DNS issues
-const customLookup: any = (
-  hostname: string,
-  options: any,
-  callback: any
-) => {
-  // Use Google's DNS resolver
-  const resolver = new dns.Resolver();
-  resolver.setServers(['8.8.8.8', '8.8.4.4']);
-
-  resolver.resolve4(hostname, (err, addresses) => {
-    if (err) {
-      console.error('[DNS] Failed to resolve', hostname, 'with Google DNS:', err.message);
-      // Fall back to system DNS
-      dns.lookup(hostname, { family: 4 }, callback);
-    } else if (addresses && addresses.length > 0) {
-      console.log('[DNS] Resolved', hostname, 'to', addresses[0]);
-      callback(null, addresses[0], 4);
-    } else {
-      callback(new Error(`No addresses found for ${hostname}`), '', 0);
-    }
-  });
-};
-
-const httpsAgent = new https.Agent({
-  lookup: customLookup,
-});
-
-/**
- * Get browser-like headers for LTK API requests
- */
-function getLTKHeaders(accessToken: string): Record<string, string> {
-  return {
-    'Authorization': `Bearer ${accessToken}`,
-    'Content-Type': 'application/json',
-    'Accept': 'application/json',
-    'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    'Origin': 'https://creator.shopltk.com',
-    'Referer': 'https://creator.shopltk.com/',
-    'Accept-Language': 'en-US,en;q=0.9',
-    'Cache-Control': 'no-cache',
-    'Pragma': 'no-cache',
-  };
-}
 
 interface LTKEarningsItem {
   date: string;
@@ -76,8 +29,68 @@ interface LTKEarningsItem {
 }
 
 /**
+ * Make API call using Puppeteer browser context (bypasses DNS issues)
+ */
+async function fetchWithPuppeteer(url: string, accessToken: string): Promise<any> {
+  console.log('[Puppeteer Fetch] Starting browser for:', url);
+
+  const browser = await puppeteer.launch({
+    headless: true,
+    args: [
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-dev-shm-usage',
+      '--disable-gpu',
+    ],
+  });
+
+  try {
+    const page = await browser.newPage();
+
+    // Set a reasonable timeout
+    page.setDefaultTimeout(30000);
+
+    // First navigate to LTK domain to establish context
+    await page.goto('https://creator.shopltk.com', { waitUntil: 'domcontentloaded' });
+
+    // Make the API call from within the browser context
+    const result = await page.evaluate(async (apiUrl: string, token: string) => {
+      try {
+        const response = await fetch(apiUrl, {
+          method: 'GET',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+          },
+        });
+
+        if (!response.ok) {
+          return {
+            error: true,
+            status: response.status,
+            statusText: response.statusText,
+            body: await response.text()
+          };
+        }
+
+        return { error: false, data: await response.json() };
+      } catch (e: any) {
+        return { error: true, message: e.message };
+      }
+    }, url, accessToken);
+
+    console.log('[Puppeteer Fetch] Result received, error:', result.error);
+    return result;
+
+  } finally {
+    await browser.close();
+  }
+}
+
+/**
  * GET /api/ltk/earnings/:userId
- * Fetch earnings data from LTK API
+ * Fetch earnings data from LTK API using Puppeteer
  */
 router.get('/earnings/:userId', async (req: Request, res: Response) => {
   const { userId } = req.params;
@@ -110,38 +123,18 @@ router.get('/earnings/:userId', async (req: Request, res: Response) => {
     }
 
     const { accessToken } = tokens;
-
-    // 3. First get creator info to get creator_id
-    console.log('[LTK Earnings] Fetching creator info...');
-    const headers = getLTKHeaders(accessToken);
-    const creatorUrl = `${LTK_API_BASE}/v1/creator/me`;
-    console.log('[LTK Earnings] Calling:', creatorUrl);
     console.log('[LTK Earnings] Token prefix:', accessToken.substring(0, 50) + '...');
 
-    let meResponse;
-    try {
-      meResponse = await fetch(creatorUrl, {
-        headers,
-        agent: httpsAgent,
-      });
-    } catch (fetchError: any) {
-      console.error('[LTK Earnings] Fetch error details:', {
-        message: fetchError.message,
-        cause: fetchError.cause,
-        code: fetchError.code,
-        errno: fetchError.errno,
-        syscall: fetchError.syscall,
-        hostname: fetchError.hostname,
-        stack: fetchError.stack?.split('\n').slice(0, 3).join('\n'),
-      });
-      throw new Error(`Network error calling LTK API: ${fetchError.message} (${fetchError.cause?.message || fetchError.code || 'unknown'})`);
-    }
+    // 3. First get creator info to get creator_id
+    console.log('[LTK Earnings] Fetching creator info via Puppeteer...');
+    const creatorUrl = `${LTK_API_BASE}/v1/creator/me`;
 
-    if (!meResponse.ok) {
-      const errorText = await meResponse.text();
-      console.error('[LTK Earnings] Failed to get creator info:', meResponse.status, errorText);
+    const meResult = await fetchWithPuppeteer(creatorUrl, accessToken);
 
-      if (meResponse.status === 401) {
+    if (meResult.error) {
+      console.error('[LTK Earnings] Failed to get creator info:', meResult);
+
+      if (meResult.status === 401) {
         return res.status(401).json({
           success: false,
           error: 'Token expired or invalid',
@@ -149,10 +142,10 @@ router.get('/earnings/:userId', async (req: Request, res: Response) => {
         });
       }
 
-      throw new Error(`Failed to get creator info: ${meResponse.status}`);
+      throw new Error(`Failed to get creator info: ${meResult.message || meResult.status}`);
     }
 
-    const creatorData = await meResponse.json() as any;
+    const creatorData = meResult.data;
     const creatorId = creatorData.id || creatorData.creator_id || creatorData.data?.id;
 
     console.log('[LTK Earnings] Creator ID:', creatorId);
@@ -166,39 +159,17 @@ router.get('/earnings/:userId', async (req: Request, res: Response) => {
     console.log('[LTK Earnings] Fetching earnings data...');
     const earningsUrl = `${LTK_API_BASE}/v1/analytics/earnings?creator_id=${creatorId}&start_date=${start}&end_date=${end}`;
 
-    const earningsResponse = await fetch(earningsUrl, {
-      headers,
-      agent: httpsAgent,
-    });
+    const earningsResult = await fetchWithPuppeteer(earningsUrl, accessToken);
 
-    if (!earningsResponse.ok) {
-      const errorText = await earningsResponse.text();
-      console.error('[LTK Earnings] Failed to fetch earnings:', earningsResponse.status, errorText);
-      throw new Error(`Failed to fetch earnings: ${earningsResponse.status}`);
+    if (earningsResult.error) {
+      console.error('[LTK Earnings] Failed to fetch earnings:', earningsResult);
+      throw new Error(`Failed to fetch earnings: ${earningsResult.status || earningsResult.message}`);
     }
 
-    const earningsData = await earningsResponse.json() as any;
+    const earningsData = earningsResult.data;
     console.log('[LTK Earnings] Raw earnings data keys:', Object.keys(earningsData));
 
-    // 5. Also try to get post analytics for more detail
-    let postAnalytics: any[] = [];
-    try {
-      const postsUrl = `${LTK_API_BASE}/v1/analytics/posts?creator_id=${creatorId}&start_date=${start}&end_date=${end}`;
-      const postsResponse = await fetch(postsUrl, {
-        headers,
-        agent: httpsAgent,
-      });
-
-      if (postsResponse.ok) {
-        const postsData = await postsResponse.json() as any;
-        postAnalytics = postsData.data || postsData.posts || postsData || [];
-        console.log('[LTK Earnings] Got post analytics:', postAnalytics.length, 'items');
-      }
-    } catch (e) {
-      console.log('[LTK Earnings] Could not fetch post analytics (non-fatal)');
-    }
-
-    // 6. Transform earnings data
+    // 5. Transform earnings data
     const rawEarnings = earningsData.data || earningsData.earnings || earningsData || [];
 
     const earnings: LTKEarningsItem[] = (Array.isArray(rawEarnings) ? rawEarnings : []).map((item: any) => ({
@@ -212,7 +183,7 @@ router.get('/earnings/:userId', async (req: Request, res: Response) => {
       orders: item.orders || item.order_count || item.conversions || 0,
     }));
 
-    // 7. Calculate summary
+    // 6. Calculate summary
     const summary = {
       totalEarnings: earnings.reduce((sum, e) => sum + parseFloat(e.commission || '0'), 0).toFixed(2),
       totalOrders: earnings.reduce((sum, e) => sum + (e.orders || 0), 0),
@@ -228,7 +199,6 @@ router.get('/earnings/:userId', async (req: Request, res: Response) => {
       summary,
       period: { start, end },
       creatorId,
-      postAnalytics: postAnalytics.slice(0, 10), // Include some post data
     });
 
   } catch (error: any) {
@@ -250,7 +220,7 @@ router.get('/analytics/:userId', async (req: Request, res: Response) => {
 
   const end = (endDate as string) || new Date().toISOString().split('T')[0];
   const start = (startDate as string) || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-  const analyticsType = (type as string) || 'posts'; // posts, brands, earnings
+  const analyticsType = (type as string) || 'posts';
 
   console.log(`[LTK Analytics] Fetching ${analyticsType} analytics for user ${userId}`);
 
@@ -265,22 +235,18 @@ router.get('/analytics/:userId', async (req: Request, res: Response) => {
     }
 
     const { accessToken } = tokens;
-    const headers = getLTKHeaders(accessToken);
 
-    // Get creator ID
-    const meResponse = await fetch(`${LTK_API_BASE}/v1/creator/me`, {
-      headers,
-      agent: httpsAgent,
-    });
+    // Get creator ID first
+    const meResult = await fetchWithPuppeteer(`${LTK_API_BASE}/v1/creator/me`, accessToken);
 
-    if (!meResponse.ok) {
+    if (meResult.error) {
       throw new Error('Failed to get creator info');
     }
 
-    const creatorData = await meResponse.json() as any;
+    const creatorData = meResult.data;
     const creatorId = creatorData.id || creatorData.creator_id || creatorData.data?.id;
 
-    // Fetch requested analytics type
+    // Build endpoint URL based on type
     let endpoint: string;
     switch (analyticsType) {
       case 'brands':
@@ -295,21 +261,16 @@ router.get('/analytics/:userId', async (req: Request, res: Response) => {
         break;
     }
 
-    const response = await fetch(endpoint, {
-      headers,
-      agent: httpsAgent,
-    });
+    const result = await fetchWithPuppeteer(endpoint, accessToken);
 
-    if (!response.ok) {
+    if (result.error) {
       throw new Error(`Failed to fetch ${analyticsType} analytics`);
     }
-
-    const data = await response.json() as any;
 
     res.json({
       success: true,
       type: analyticsType,
-      data: data.data || data,
+      data: result.data?.data || result.data,
       period: { start, end },
       creatorId,
     });
