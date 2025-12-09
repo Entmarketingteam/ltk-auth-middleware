@@ -10,8 +10,8 @@ import { getTokens, getConnectionStatus } from '../services/tokenStorage.js';
 
 const router = Router();
 
-// LTK API Base URL
-const LTK_API_BASE = 'https://creator-api.shopltk.com';
+// LTK API Base URL - use the gateway endpoint that the tokens are scoped to
+const LTK_API_BASE = 'https://creator-api-gateway.shopltk.com';
 
 /**
  * Get browser-like headers for LTK API requests
@@ -81,7 +81,7 @@ router.get('/earnings/:userId', async (req: Request, res: Response) => {
     console.log('[LTK Earnings] Fetching creator info...');
     const headers = getLTKHeaders(accessToken);
 
-    const meResponse = await fetch(`${LTK_API_BASE}/v3/creator/me`, {
+    const meResponse = await fetch(`${LTK_API_BASE}/v1/creator/me`, {
       headers,
     });
 
@@ -112,7 +112,7 @@ router.get('/earnings/:userId', async (req: Request, res: Response) => {
 
     // 4. Fetch earnings data
     console.log('[LTK Earnings] Fetching earnings data...');
-    const earningsUrl = `${LTK_API_BASE}/v3/analytics/earnings?creator_id=${creatorId}&start_date=${start}&end_date=${end}`;
+    const earningsUrl = `${LTK_API_BASE}/v1/analytics/earnings?creator_id=${creatorId}&start_date=${start}&end_date=${end}`;
 
     const earningsResponse = await fetch(earningsUrl, {
       headers,
@@ -130,7 +130,7 @@ router.get('/earnings/:userId', async (req: Request, res: Response) => {
     // 5. Also try to get post analytics for more detail
     let postAnalytics: any[] = [];
     try {
-      const postsUrl = `${LTK_API_BASE}/v3/analytics/posts?creator_id=${creatorId}&start_date=${start}&end_date=${end}`;
+      const postsUrl = `${LTK_API_BASE}/v1/analytics/posts?creator_id=${creatorId}&start_date=${start}&end_date=${end}`;
       const postsResponse = await fetch(postsUrl, {
         headers,
       });
@@ -214,7 +214,7 @@ router.get('/analytics/:userId', async (req: Request, res: Response) => {
     const headers = getLTKHeaders(accessToken);
 
     // Get creator ID
-    const meResponse = await fetch(`${LTK_API_BASE}/v3/creator/me`, {
+    const meResponse = await fetch(`${LTK_API_BASE}/v1/creator/me`, {
       headers,
     });
 
@@ -229,14 +229,14 @@ router.get('/analytics/:userId', async (req: Request, res: Response) => {
     let endpoint: string;
     switch (analyticsType) {
       case 'brands':
-        endpoint = `${LTK_API_BASE}/v3/analytics/brands?creator_id=${creatorId}&start_date=${start}&end_date=${end}`;
+        endpoint = `${LTK_API_BASE}/v1/analytics/brands?creator_id=${creatorId}&start_date=${start}&end_date=${end}`;
         break;
       case 'earnings':
-        endpoint = `${LTK_API_BASE}/v3/analytics/earnings?creator_id=${creatorId}&start_date=${start}&end_date=${end}`;
+        endpoint = `${LTK_API_BASE}/v1/analytics/earnings?creator_id=${creatorId}&start_date=${start}&end_date=${end}`;
         break;
       case 'posts':
       default:
-        endpoint = `${LTK_API_BASE}/v3/analytics/posts?creator_id=${creatorId}&start_date=${start}&end_date=${end}`;
+        endpoint = `${LTK_API_BASE}/v1/analytics/posts?creator_id=${creatorId}&start_date=${start}&end_date=${end}`;
         break;
     }
 
