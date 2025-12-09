@@ -67,9 +67,11 @@ router.get('/earnings/:userId', async (req, res) => {
                 error: 'No valid tokens found',
             });
         }
-        const { accessToken, idToken, publisherId } = tokens;
+        const { accessToken, idToken, publisherId, publisherIds } = tokens;
+        // Use publisherIds (multiple) if available, fallback to single publisherId
+        const idsForAnalytics = publisherIds || publisherId;
         console.log('[LTK Earnings] Token prefix:', accessToken.substring(0, 50) + '...');
-        console.log('[LTK Earnings] Publisher ID:', publisherId);
+        console.log('[LTK Earnings] Publisher IDs:', idsForAnalytics);
         if (!idToken) {
             return res.status(401).json({
                 success: false,
@@ -77,7 +79,7 @@ router.get('/earnings/:userId', async (req, res) => {
                 needsReauth: true,
             });
         }
-        if (!publisherId) {
+        if (!idsForAnalytics) {
             return res.status(400).json({
                 success: false,
                 error: 'Publisher ID not found. Please reconnect your LTK account.',
@@ -89,7 +91,7 @@ router.get('/earnings/:userId', async (req, res) => {
         const endDateTime = `${end}T23:59:59Z`;
         // 3. Fetch hero chart data (summary stats)
         console.log('[LTK Earnings] Fetching hero chart data...');
-        const heroUrl = `${LTK_API_BASE}/analytics/hero_chart?start_date=${encodeURIComponent(startDateTime)}&end_date=${encodeURIComponent(endDateTime)}&publisher_ids=${publisherId}&interval=day&platform=rs,ltk&timezone=UTC`;
+        const heroUrl = `${LTK_API_BASE}/analytics/hero_chart?start_date=${encodeURIComponent(startDateTime)}&end_date=${encodeURIComponent(endDateTime)}&publisher_ids=${idsForAnalytics}&interval=day&platform=rs,ltk&timezone=UTC`;
         const heroResult = await fetchLTKApi(heroUrl, accessToken, idToken);
         if (heroResult.error) {
             console.error('[LTK Earnings] Failed to fetch hero chart:', heroResult);
@@ -106,7 +108,7 @@ router.get('/earnings/:userId', async (req, res) => {
         console.log('[LTK Earnings] Hero data:', JSON.stringify(heroData).substring(0, 200));
         // 4. Fetch top performers/links data for detailed breakdown
         console.log('[LTK Earnings] Fetching top performers...');
-        const topPerformersUrl = `${LTK_API_BASE}/analytics/top_performers/links?start_date=${encodeURIComponent(startDateTime)}&end_date=${encodeURIComponent(endDateTime)}&publisher_ids=${publisherId}&platform=rs,ltk&timezone=UTC&limit=50`;
+        const topPerformersUrl = `${LTK_API_BASE}/analytics/top_performers/links?start_date=${encodeURIComponent(startDateTime)}&end_date=${encodeURIComponent(endDateTime)}&publisher_ids=${idsForAnalytics}&platform=rs,ltk&timezone=UTC&limit=50`;
         const topPerformersResult = await fetchLTKApi(topPerformersUrl, accessToken, idToken);
         let earnings = [];
         if (!topPerformersResult.error && topPerformersResult.data) {

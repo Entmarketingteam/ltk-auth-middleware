@@ -9,6 +9,7 @@ export interface LTKTokens {
     idToken: string;
     expiresAt: number;
     publisherId?: string;
+    publisherIds?: string;
 }
 export interface ConnectionStatus {
     connected: boolean;
@@ -41,6 +42,11 @@ export declare function markConnectionError(userId: string, errorMessage: string
  * Disconnect LTK (remove tokens)
  */
 export declare function disconnectLTK(userId: string): Promise<void>;
+/**
+ * Update publisher IDs for a user
+ * Use this to set multiple publisher IDs for analytics (comma-separated)
+ */
+export declare function updatePublisherIds(userId: string, publisherIds: string): Promise<void>;
 /**
  * Get all connections that need token refresh
  * (tokens expiring within the next 10 minutes)

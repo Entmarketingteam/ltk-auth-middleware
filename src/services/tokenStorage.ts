@@ -29,7 +29,8 @@ export interface LTKTokens {
   accessToken: string;
   idToken: string;
   expiresAt: number; // Unix timestamp
-  publisherId?: string; // Extracted from JWT claims
+  publisherId?: string; // Primary publisher ID from JWT
+  publisherIds?: string; // All publisher IDs (comma-separated) for analytics
 }
 
 /**
@@ -118,6 +119,9 @@ export async function storeTokens(
     .eq('platform', 'LTK')
     .single();
 
+  // Use provided publisherIds or just the primary one
+  const allPublisherIds = tokens.publisherIds || publisherId;
+
   const connectionData = {
     user_id: userId,
     platform: 'LTK' as const,
@@ -129,7 +133,7 @@ export async function storeTokens(
     last_refresh_at: new Date().toISOString(),
     refresh_error: null,
     updated_at: new Date().toISOString(),
-    metadata: { publisher_id: publisherId },
+    metadata: { publisher_id: publisherId, publisher_ids: allPublisherIds },
   };
 
   if (existing) {
@@ -193,13 +197,19 @@ export async function getTokens(userId: string): Promise<LTKTokens | null> {
     // Get publisherId from metadata or extract from idToken
     const metadata = connection.metadata as Record<string, unknown> | null;
     let publisherId = metadata?.publisher_id as string | undefined;
+    let publisherIds = metadata?.publisher_ids as string | undefined;
 
     // Fallback: extract from idToken if not in metadata
     if (!publisherId) {
       publisherId = extractPublisherId(idToken) || undefined;
     }
 
-    return { accessToken, idToken, expiresAt, publisherId };
+    // If no publisherIds, use the single publisherId
+    if (!publisherIds && publisherId) {
+      publisherIds = publisherId;
+    }
+
+    return { accessToken, idToken, expiresAt, publisherId, publisherIds };
   } catch (decryptError) {
     console.error(`[Token Storage] Failed to decrypt tokens for user ${userId}:`, decryptError);
     return null;
@@ -295,7 +305,7 @@ export async function markConnectionError(
  */
 export async function disconnectLTK(userId: string): Promise<void> {
   const db = getSupabase();
-  
+
   const { error } = await db
     .from('platform_connections')
     .update({
@@ -307,12 +317,56 @@ export async function disconnectLTK(userId: string): Promise<void> {
     })
     .eq('user_id', userId)
     .eq('platform', 'LTK');
-  
+
   if (error) {
     throw new Error(`Failed to disconnect: ${error.message}`);
   }
-  
+
   console.log(`[Token Storage] Disconnected LTK for user ${userId}`);
+}
+
+/**
+ * Update publisher IDs for a user
+ * Use this to set multiple publisher IDs for analytics (comma-separated)
+ */
+export async function updatePublisherIds(
+  userId: string,
+  publisherIds: string
+): Promise<void> {
+  const db = getSupabase();
+
+  // Get current connection
+  const { data: existing, error: fetchError } = await db
+    .from('platform_connections')
+    .select('id, metadata')
+    .eq('user_id', userId)
+    .eq('platform', 'LTK')
+    .single();
+
+  if (fetchError || !existing) {
+    throw new Error('No LTK connection found for user');
+  }
+
+  // Update metadata with new publisher_ids
+  const currentMetadata = (existing.metadata as Record<string, unknown>) || {};
+  const updatedMetadata = {
+    ...currentMetadata,
+    publisher_ids: publisherIds,
+  };
+
+  const { error } = await db
+    .from('platform_connections')
+    .update({
+      metadata: updatedMetadata,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', existing.id);
+
+  if (error) {
+    throw new Error(`Failed to update publisher IDs: ${error.message}`);
+  }
+
+  console.log(`[Token Storage] Updated publisher_ids for user ${userId}: ${publisherIds}`);
 }
 
 /**
