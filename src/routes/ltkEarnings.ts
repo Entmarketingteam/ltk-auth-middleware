@@ -13,6 +13,23 @@ const router = Router();
 // LTK API Base URL
 const LTK_API_BASE = 'https://creator-api.shopltk.com';
 
+/**
+ * Get browser-like headers for LTK API requests
+ */
+function getLTKHeaders(accessToken: string): Record<string, string> {
+  return {
+    'Authorization': `Bearer ${accessToken}`,
+    'Content-Type': 'application/json',
+    'Accept': 'application/json',
+    'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'Origin': 'https://creator.shopltk.com',
+    'Referer': 'https://creator.shopltk.com/',
+    'Accept-Language': 'en-US,en;q=0.9',
+    'Cache-Control': 'no-cache',
+    'Pragma': 'no-cache',
+  };
+}
+
 interface LTKEarningsItem {
   date: string;
   product: string;
@@ -62,12 +79,10 @@ router.get('/earnings/:userId', async (req: Request, res: Response) => {
 
     // 3. First get creator info to get creator_id
     console.log('[LTK Earnings] Fetching creator info...');
+    const headers = getLTKHeaders(accessToken);
+
     const meResponse = await fetch(`${LTK_API_BASE}/v3/creator/me`, {
-      headers: {
-        'Authorization': `Bearer ${accessToken}`,
-        'Content-Type': 'application/json',
-        'Accept': 'application/json',
-      },
+      headers,
     });
 
     if (!meResponse.ok) {
@@ -100,11 +115,7 @@ router.get('/earnings/:userId', async (req: Request, res: Response) => {
     const earningsUrl = `${LTK_API_BASE}/v3/analytics/earnings?creator_id=${creatorId}&start_date=${start}&end_date=${end}`;
 
     const earningsResponse = await fetch(earningsUrl, {
-      headers: {
-        'Authorization': `Bearer ${accessToken}`,
-        'Content-Type': 'application/json',
-        'Accept': 'application/json',
-      },
+      headers,
     });
 
     if (!earningsResponse.ok) {
@@ -121,11 +132,7 @@ router.get('/earnings/:userId', async (req: Request, res: Response) => {
     try {
       const postsUrl = `${LTK_API_BASE}/v3/analytics/posts?creator_id=${creatorId}&start_date=${start}&end_date=${end}`;
       const postsResponse = await fetch(postsUrl, {
-        headers: {
-          'Authorization': `Bearer ${accessToken}`,
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-        },
+        headers,
       });
 
       if (postsResponse.ok) {
@@ -204,13 +211,11 @@ router.get('/analytics/:userId', async (req: Request, res: Response) => {
     }
 
     const { accessToken } = tokens;
+    const headers = getLTKHeaders(accessToken);
 
     // Get creator ID
     const meResponse = await fetch(`${LTK_API_BASE}/v3/creator/me`, {
-      headers: {
-        'Authorization': `Bearer ${accessToken}`,
-        'Content-Type': 'application/json',
-      },
+      headers,
     });
 
     if (!meResponse.ok) {
@@ -236,10 +241,7 @@ router.get('/analytics/:userId', async (req: Request, res: Response) => {
     }
 
     const response = await fetch(endpoint, {
-      headers: {
-        'Authorization': `Bearer ${accessToken}`,
-        'Content-Type': 'application/json',
-      },
+      headers,
     });
 
     if (!response.ok) {
