@@ -7,6 +7,8 @@
 
 import { Router, Request, Response as ExpressResponse } from 'express';
 import fetch from 'node-fetch';
+import https from 'https';
+import dns from 'dns';
 import { getTokens, getConnectionStatus } from '../services/tokenStorage.js';
 
 // Type alias for Express Response
@@ -16,6 +18,34 @@ const router = Router();
 
 // LTK API Base URL - use the gateway endpoint that the tokens are scoped to
 const LTK_API_BASE = 'https://creator-api-gateway.shopltk.com';
+
+// Custom HTTPS agent with Google DNS lookup to fix Railway container DNS issues
+const customLookup = (
+  hostname: string,
+  options: dns.LookupOptions,
+  callback: (err: NodeJS.ErrnoException | null, address: string, family: number) => void
+) => {
+  // Use Google's DNS resolver
+  const resolver = new dns.Resolver();
+  resolver.setServers(['8.8.8.8', '8.8.4.4']);
+
+  resolver.resolve4(hostname, (err, addresses) => {
+    if (err) {
+      console.error('[DNS] Failed to resolve', hostname, 'with Google DNS:', err.message);
+      // Fall back to system DNS
+      dns.lookup(hostname, options, callback);
+    } else if (addresses && addresses.length > 0) {
+      console.log('[DNS] Resolved', hostname, 'to', addresses[0]);
+      callback(null, addresses[0], 4);
+    } else {
+      callback(new Error(`No addresses found for ${hostname}`), '', 0);
+    }
+  });
+};
+
+const httpsAgent = new https.Agent({
+  lookup: customLookup as any,
+});
 
 /**
  * Get browser-like headers for LTK API requests
@@ -92,6 +122,7 @@ router.get('/earnings/:userId', async (req: Request, res: Response) => {
     try {
       meResponse = await fetch(creatorUrl, {
         headers,
+        agent: httpsAgent,
       });
     } catch (fetchError: any) {
       console.error('[LTK Earnings] Fetch error details:', {
@@ -137,6 +168,7 @@ router.get('/earnings/:userId', async (req: Request, res: Response) => {
 
     const earningsResponse = await fetch(earningsUrl, {
       headers,
+      agent: httpsAgent,
     });
 
     if (!earningsResponse.ok) {
@@ -154,6 +186,7 @@ router.get('/earnings/:userId', async (req: Request, res: Response) => {
       const postsUrl = `${LTK_API_BASE}/v1/analytics/posts?creator_id=${creatorId}&start_date=${start}&end_date=${end}`;
       const postsResponse = await fetch(postsUrl, {
         headers,
+        agent: httpsAgent,
       });
 
       if (postsResponse.ok) {
@@ -237,6 +270,7 @@ router.get('/analytics/:userId', async (req: Request, res: Response) => {
     // Get creator ID
     const meResponse = await fetch(`${LTK_API_BASE}/v1/creator/me`, {
       headers,
+      agent: httpsAgent,
     });
 
     if (!meResponse.ok) {
@@ -263,6 +297,7 @@ router.get('/analytics/:userId', async (req: Request, res: Response) => {
 
     const response = await fetch(endpoint, {
       headers,
+      agent: httpsAgent,
     });
 
     if (!response.ok) {
