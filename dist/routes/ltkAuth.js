@@ -157,5 +157,78 @@ router.delete('/disconnect/:userId', async (req, res) => {
         });
     }
 });
+/**
+ * PUT /api/ltk/publisher-ids/:userId
+ *
+ * Update publisher IDs for analytics (use comma-separated IDs for multiple accounts)
+ * Example: "293045,987693288,987748582"
+ */
+router.put('/publisher-ids/:userId', async (req, res) => {
+    const { userId } = req.params;
+    const { publisherIds } = req.body;
+    if (!userId) {
+        return res.status(400).json({
+            success: false,
+            error: 'userId is required',
+        });
+    }
+    if (!publisherIds || typeof publisherIds !== 'string') {
+        return res.status(400).json({
+            success: false,
+            error: 'publisherIds is required (comma-separated string)',
+        });
+    }
+    try {
+        await (0, tokenStorage_js_1.updatePublisherIds)(userId, publisherIds);
+        console.log(`[LTK Auth] Updated publisher IDs for user ${userId}: ${publisherIds}`);
+        return res.json({
+            success: true,
+            message: 'Publisher IDs updated',
+            publisherIds,
+        });
+    }
+    catch (error) {
+        console.error(`[LTK Auth] Error updating publisher IDs for user ${userId}:`, error);
+        return res.status(500).json({
+            success: false,
+            error: error.message || 'Internal server error',
+        });
+    }
+});
+/**
+ * GET /api/ltk/publisher-ids/:userId
+ *
+ * Get current publisher IDs for a user
+ */
+router.get('/publisher-ids/:userId', async (req, res) => {
+    const { userId } = req.params;
+    if (!userId) {
+        return res.status(400).json({
+            success: false,
+            error: 'userId is required',
+        });
+    }
+    try {
+        const tokens = await (0, tokenStorage_js_1.getTokens)(userId);
+        if (!tokens) {
+            return res.status(404).json({
+                success: false,
+                error: 'No LTK connection found',
+            });
+        }
+        return res.json({
+            success: true,
+            publisherId: tokens.publisherId,
+            publisherIds: tokens.publisherIds,
+        });
+    }
+    catch (error) {
+        console.error(`[LTK Auth] Error getting publisher IDs for user ${userId}:`, error);
+        return res.status(500).json({
+            success: false,
+            error: error.message || 'Internal server error',
+        });
+    }
+});
 exports.default = router;
 //# sourceMappingURL=ltkAuth.js.map

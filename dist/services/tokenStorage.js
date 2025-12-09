@@ -12,6 +12,7 @@ exports.getConnectionStatus = getConnectionStatus;
 exports.updateTokenExpiration = updateTokenExpiration;
 exports.markConnectionError = markConnectionError;
 exports.disconnectLTK = disconnectLTK;
+exports.updatePublisherIds = updatePublisherIds;
 exports.getConnectionsNeedingRefresh = getConnectionsNeedingRefresh;
 const supabase_js_1 = require("@supabase/supabase-js");
 const encryption_js_1 = require("../utils/encryption.js");
@@ -82,6 +83,8 @@ async function storeTokens(userId, tokens) {
         .eq('user_id', userId)
         .eq('platform', 'LTK')
         .single();
+    // Use provided publisherIds or just the primary one
+    const allPublisherIds = tokens.publisherIds || publisherId;
     const connectionData = {
         user_id: userId,
         platform: 'LTK',
@@ -93,7 +96,7 @@ async function storeTokens(userId, tokens) {
         last_refresh_at: new Date().toISOString(),
         refresh_error: null,
         updated_at: new Date().toISOString(),
-        metadata: { publisher_id: publisherId },
+        metadata: { publisher_id: publisherId, publisher_ids: allPublisherIds },
     };
     if (existing) {
         // Update existing connection
@@ -147,11 +150,16 @@ async function getTokens(userId) {
         // Get publisherId from metadata or extract from idToken
         const metadata = connection.metadata;
         let publisherId = metadata?.publisher_id;
+        let publisherIds = metadata?.publisher_ids;
         // Fallback: extract from idToken if not in metadata
         if (!publisherId) {
             publisherId = extractPublisherId(idToken) || undefined;
         }
-        return { accessToken, idToken, expiresAt, publisherId };
+        // If no publisherIds, use the single publisherId
+        if (!publisherIds && publisherId) {
+            publisherIds = publisherId;
+        }
+        return { accessToken, idToken, expiresAt, publisherId, publisherIds };
     }
     catch (decryptError) {
         console.error(`[Token Storage] Failed to decrypt tokens for user ${userId}:`, decryptError);
@@ -245,6 +253,40 @@ async function disconnectLTK(userId) {
         throw new Error(`Failed to disconnect: ${error.message}`);
     }
     console.log(`[Token Storage] Disconnected LTK for user ${userId}`);
+}
+/**
+ * Update publisher IDs for a user
+ * Use this to set multiple publisher IDs for analytics (comma-separated)
+ */
+async function updatePublisherIds(userId, publisherIds) {
+    const db = getSupabase();
+    // Get current connection
+    const { data: existing, error: fetchError } = await db
+        .from('platform_connections')
+        .select('id, metadata')
+        .eq('user_id', userId)
+        .eq('platform', 'LTK')
+        .single();
+    if (fetchError || !existing) {
+        throw new Error('No LTK connection found for user');
+    }
+    // Update metadata with new publisher_ids
+    const currentMetadata = existing.metadata || {};
+    const updatedMetadata = {
+        ...currentMetadata,
+        publisher_ids: publisherIds,
+    };
+    const { error } = await db
+        .from('platform_connections')
+        .update({
+        metadata: updatedMetadata,
+        updated_at: new Date().toISOString(),
+    })
+        .eq('id', existing.id);
+    if (error) {
+        throw new Error(`Failed to update publisher IDs: ${error.message}`);
+    }
+    console.log(`[Token Storage] Updated publisher_ids for user ${userId}: ${publisherIds}`);
 }
 /**
  * Get all connections that need token refresh
