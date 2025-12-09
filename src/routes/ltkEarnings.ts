@@ -80,10 +80,27 @@ router.get('/earnings/:userId', async (req: Request, res: Response) => {
     // 3. First get creator info to get creator_id
     console.log('[LTK Earnings] Fetching creator info...');
     const headers = getLTKHeaders(accessToken);
+    const creatorUrl = `${LTK_API_BASE}/v1/creator/me`;
+    console.log('[LTK Earnings] Calling:', creatorUrl);
+    console.log('[LTK Earnings] Token prefix:', accessToken.substring(0, 50) + '...');
 
-    const meResponse = await fetch(`${LTK_API_BASE}/v1/creator/me`, {
-      headers,
-    });
+    let meResponse: Response;
+    try {
+      meResponse = await fetch(creatorUrl, {
+        headers,
+      });
+    } catch (fetchError: any) {
+      console.error('[LTK Earnings] Fetch error details:', {
+        message: fetchError.message,
+        cause: fetchError.cause,
+        code: fetchError.code,
+        errno: fetchError.errno,
+        syscall: fetchError.syscall,
+        hostname: fetchError.hostname,
+        stack: fetchError.stack?.split('\n').slice(0, 3).join('\n'),
+      });
+      throw new Error(`Network error calling LTK API: ${fetchError.message} (${fetchError.cause?.message || fetchError.code || 'unknown'})`);
+    }
 
     if (!meResponse.ok) {
       const errorText = await meResponse.text();
