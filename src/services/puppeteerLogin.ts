@@ -325,31 +325,70 @@ export async function loginToLTK(
     let idToken = '';
     let tokenSource = 'none';
 
-    // Check cookies first
-    for (const cookie of authCookies) {
-      if (cookie.value && cookie.value.length > 20) {
-        // This might be a token
-        if (cookie.name.includes('token') || cookie.name.includes('Token')) {
-          if (!accessToken) {
-            accessToken = decodeURIComponent(cookie.value).replace('Bearer ', '');
-            tokenSource = `cookie:${cookie.name}`;
+    // First, look for Auth0 SPA JS tokens in localStorage (most reliable)
+    // These are stored as JSON with the access_token inside
+    for (const [key, value] of Object.entries(allStorage)) {
+      if (key.includes('@@auth0spajs@@') && value) {
+        console.log('[LTK Login] Found Auth0 SPA JS key:', key);
+        try {
+          // The value might be truncated, but let's try to parse it
+          // First, try to get the full value from page
+          const fullValue = await page.evaluate((storageKey: string) => {
+            const actualKey = storageKey.replace('localStorage:', '');
+            return window.localStorage.getItem(actualKey);
+          }, key);
+
+          if (fullValue) {
+            console.log('[LTK Login] Full Auth0 value length:', fullValue.length);
+            const parsed = JSON.parse(fullValue);
+            if (parsed.body?.access_token) {
+              accessToken = parsed.body.access_token;
+              tokenSource = key;
+              console.log('[LTK Login] Extracted access_token from Auth0 SPA JS');
+            }
+            if (parsed.body?.id_token) {
+              idToken = parsed.body.id_token;
+              console.log('[LTK Login] Extracted id_token from Auth0 SPA JS');
+            }
+          }
+        } catch (e) {
+          console.log('[LTK Login] Could not parse Auth0 value:', e);
+        }
+      }
+    }
+
+    // Also check the @@user@@ key for id_token
+    if (!idToken) {
+      for (const [key, value] of Object.entries(allStorage)) {
+        if (key.includes('@@user@@') && value) {
+          try {
+            const fullValue = await page.evaluate((storageKey: string) => {
+              const actualKey = storageKey.replace('localStorage:', '');
+              return window.localStorage.getItem(actualKey);
+            }, key);
+
+            if (fullValue) {
+              const parsed = JSON.parse(fullValue);
+              if (parsed.id_token) {
+                idToken = parsed.id_token;
+                console.log('[LTK Login] Extracted id_token from @@user@@ key');
+              }
+            }
+          } catch (e) {
+            // Ignore parse errors
           }
         }
       }
     }
 
-    // Check localStorage for tokens
-    for (const [key, value] of Object.entries(allStorage)) {
-      if (key.includes('localStorage') && value && value.length > 20) {
-        if (key.includes('token') || key.includes('Token') || key.includes('access')) {
-          if (!accessToken) {
-            accessToken = value;
-            tokenSource = key;
-          }
-        }
-        if (key.includes('id_token') || key.includes('idToken')) {
-          if (!idToken) {
-            idToken = value;
+    // Fallback: Check cookies
+    if (!accessToken) {
+      for (const cookie of authCookies) {
+        if (cookie.value && cookie.value.length > 20) {
+          if (cookie.name.includes('token') || cookie.name.includes('Token')) {
+            accessToken = decodeURIComponent(cookie.value).replace('Bearer ', '');
+            tokenSource = `cookie:${cookie.name}`;
+            break;
           }
         }
       }
