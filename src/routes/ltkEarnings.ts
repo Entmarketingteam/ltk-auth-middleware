@@ -20,10 +20,10 @@ const router = Router();
 const LTK_API_BASE = 'https://creator-api-gateway.shopltk.com';
 
 // Custom HTTPS agent with Google DNS lookup to fix Railway container DNS issues
-const customLookup = (
+const customLookup: any = (
   hostname: string,
-  options: dns.LookupOptions,
-  callback: (err: NodeJS.ErrnoException | null, address: string, family: number) => void
+  options: any,
+  callback: any
 ) => {
   // Use Google's DNS resolver
   const resolver = new dns.Resolver();
@@ -33,7 +33,7 @@ const customLookup = (
     if (err) {
       console.error('[DNS] Failed to resolve', hostname, 'with Google DNS:', err.message);
       // Fall back to system DNS
-      dns.lookup(hostname, options, callback);
+      dns.lookup(hostname, { family: 4 }, callback);
     } else if (addresses && addresses.length > 0) {
       console.log('[DNS] Resolved', hostname, 'to', addresses[0]);
       callback(null, addresses[0], 4);
@@ -44,7 +44,7 @@ const customLookup = (
 };
 
 const httpsAgent = new https.Agent({
-  lookup: customLookup as any,
+  lookup: customLookup,
 });
 
 /**
