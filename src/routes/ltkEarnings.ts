@@ -5,8 +5,12 @@
  * Uses the real LTK Creator API endpoints.
  */
 
-import { Router, Request, Response } from 'express';
+import { Router, Request, Response as ExpressResponse } from 'express';
+import fetch from 'node-fetch';
 import { getTokens, getConnectionStatus } from '../services/tokenStorage.js';
+
+// Type alias for Express Response
+type Response = ExpressResponse;
 
 const router = Router();
 
@@ -84,7 +88,7 @@ router.get('/earnings/:userId', async (req: Request, res: Response) => {
     console.log('[LTK Earnings] Calling:', creatorUrl);
     console.log('[LTK Earnings] Token prefix:', accessToken.substring(0, 50) + '...');
 
-    let meResponse: Response;
+    let meResponse;
     try {
       meResponse = await fetch(creatorUrl, {
         headers,
