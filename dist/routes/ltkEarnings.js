@@ -12,6 +12,33 @@ const router = (0, express_1.Router)();
 // LTK API Base URL - the actual working endpoint discovered from browser DevTools
 const LTK_API_BASE = 'https://api-gateway.rewardstyle.com';
 /**
+ * Helper function to sum values from hero_chart date_ranges array
+ * The API returns data like: { "commissions": { "date_ranges": [{"2025-11-09...": 123.45}, ...] } }
+ */
+function sumDateRanges(dateRanges) {
+    if (!dateRanges || !Array.isArray(dateRanges))
+        return 0;
+    return dateRanges.reduce((sum, item) => {
+        const value = Object.values(item)[0];
+        return sum + (typeof value === 'number' ? value : 0);
+    }, 0);
+}
+/**
+ * Extract aggregated totals from hero_chart response
+ * The API returns time-series data, we need to aggregate it
+ */
+function extractHeroChartSummary(heroData) {
+    const data = heroData?.data || heroData || {};
+    return {
+        commissions: sumDateRanges(data.commissions?.date_ranges),
+        clicks: sumDateRanges(data.clicks?.date_ranges),
+        orders: sumDateRanges(data.orders?.date_ranges),
+        items_sold: sumDateRanges(data.items_sold?.date_ranges),
+        conversion_rate: data.conversion_rate || 0,
+        average_order_value: data.average_order_value || 0,
+    };
+}
+/**
  * Make API call to LTK/Rewardstyle API with proper headers
  */
 async function fetchLTKApi(url, accessToken, idToken) {
@@ -124,17 +151,18 @@ router.get('/earnings/:userId', async (req, res) => {
                 orders: item.orders || item.conversions || 0,
             }));
         }
-        // 5. Build summary from hero chart data
-        const aggregatedData = heroData?.aggregated || heroData || {};
+        // 5. Build summary from hero chart data (aggregate time-series data)
+        const aggregatedData = extractHeroChartSummary(heroData);
         const summary = {
-            totalEarnings: aggregatedData.commissions?.toFixed(2) || '0.00',
-            totalOrders: aggregatedData.orders || 0,
-            totalClicks: aggregatedData.clicks || 0,
-            itemsSold: aggregatedData.items_sold || 0,
-            conversionRate: aggregatedData.conversion_rate?.toFixed(2) || '0.00',
-            averageOrderValue: aggregatedData.average_order_value?.toFixed(2) || '0.00',
+            totalEarnings: aggregatedData.commissions.toFixed(2),
+            totalOrders: aggregatedData.orders,
+            totalClicks: aggregatedData.clicks,
+            itemsSold: aggregatedData.items_sold,
+            conversionRate: aggregatedData.conversion_rate ? aggregatedData.conversion_rate.toFixed(2) : '0.00',
+            averageOrderValue: aggregatedData.average_order_value ? aggregatedData.average_order_value.toFixed(2) : '0.00',
             itemCount: earnings.length,
         };
+        console.log('[LTK Earnings] Aggregated summary:', JSON.stringify(summary));
         console.log('[LTK Earnings] Returning', earnings.length, 'earnings items');
         res.json({
             success: true,
@@ -173,7 +201,8 @@ router.get('/analytics/:userId', async (req, res) => {
                 error: 'LTK not connected',
             });
         }
-        const { accessToken, idToken, publisherId } = tokens;
+        const { accessToken, idToken, publisherId, publisherIds } = tokens;
+        const idsForAnalytics = publisherIds || publisherId;
         if (!idToken) {
             return res.status(401).json({
                 success: false,
@@ -181,7 +210,7 @@ router.get('/analytics/:userId', async (req, res) => {
                 needsReauth: true,
             });
         }
-        if (!publisherId) {
+        if (!idsForAnalytics) {
             return res.status(400).json({
                 success: false,
                 error: 'Publisher ID not found. Please reconnect your LTK account.',
@@ -196,17 +225,17 @@ router.get('/analytics/:userId', async (req, res) => {
         switch (analyticsType) {
             case 'top_performers':
             case 'links':
-                endpoint = `${LTK_API_BASE}/analytics/top_performers/links?start_date=${encodeURIComponent(startDateTime)}&end_date=${encodeURIComponent(endDateTime)}&publisher_ids=${publisherId}&platform=rs,ltk&timezone=UTC&limit=50`;
+                endpoint = `${LTK_API_BASE}/analytics/top_performers/links?start_date=${encodeURIComponent(startDateTime)}&end_date=${encodeURIComponent(endDateTime)}&publisher_ids=${idsForAnalytics}&platform=rs,ltk&timezone=UTC&limit=50`;
                 break;
             case 'performance_summary':
-                endpoint = `${LTK_API_BASE}/analytics/performance_summary?start_date=${encodeURIComponent(startDateTime)}&end_date=${encodeURIComponent(endDateTime)}&publisher_ids=${publisherId}&platform=rs,ltk&timezone=UTC`;
+                endpoint = `${LTK_API_BASE}/analytics/performance_summary?start_date=${encodeURIComponent(startDateTime)}&end_date=${encodeURIComponent(endDateTime)}&publisher_ids=${idsForAnalytics}&platform=rs,ltk&timezone=UTC`;
                 break;
             case 'contributors':
-                endpoint = `${LTK_API_BASE}/analytics/contributors?start_date=${encodeURIComponent(startDateTime)}&end_date=${encodeURIComponent(endDateTime)}&publisher_ids=${publisherId}&platform=rs,ltk&timezone=UTC`;
+                endpoint = `${LTK_API_BASE}/analytics/contributors?start_date=${encodeURIComponent(startDateTime)}&end_date=${encodeURIComponent(endDateTime)}&publisher_ids=${idsForAnalytics}&platform=rs,ltk&timezone=UTC`;
                 break;
             case 'hero_chart':
             default:
-                endpoint = `${LTK_API_BASE}/analytics/hero_chart?start_date=${encodeURIComponent(startDateTime)}&end_date=${encodeURIComponent(endDateTime)}&publisher_ids=${publisherId}&interval=day&platform=rs,ltk&timezone=UTC`;
+                endpoint = `${LTK_API_BASE}/analytics/hero_chart?start_date=${encodeURIComponent(startDateTime)}&end_date=${encodeURIComponent(endDateTime)}&publisher_ids=${idsForAnalytics}&interval=day&platform=rs,ltk&timezone=UTC`;
                 break;
         }
         const result = await fetchLTKApi(endpoint, accessToken, idToken);
@@ -369,7 +398,8 @@ router.get('/overview/:userId', async (req, res) => {
                 error: 'LTK not connected',
             });
         }
-        const { accessToken, idToken, publisherId } = tokens;
+        const { accessToken, idToken, publisherId, publisherIds } = tokens;
+        const idsForAnalytics = publisherIds || publisherId;
         if (!idToken) {
             return res.status(401).json({
                 success: false,
@@ -378,7 +408,7 @@ router.get('/overview/:userId', async (req, res) => {
             });
         }
         // v1 overview endpoint - supports both ISO timestamps and creator_ids
-        const url = `${LTK_API_BASE}/api/creator-analytics/v1/overview?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}&currency=${currencyCode}&platform=rs,ltk&timezone=UTC${publisherId ? `&creator_ids=${publisherId}` : ''}`;
+        const url = `${LTK_API_BASE}/api/creator-analytics/v1/overview?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}&currency=${currencyCode}&platform=rs,ltk&timezone=UTC${idsForAnalytics ? `&creator_ids=${idsForAnalytics}` : ''}`;
         const result = await fetchLTKApi(url, accessToken, idToken);
         if (result.error) {
             if (result.status === 401) {
@@ -428,8 +458,9 @@ router.get('/top-performers/:userId', async (req, res) => {
                 error: 'LTK not connected',
             });
         }
-        const { accessToken, idToken, publisherId } = tokens;
-        if (!idToken || !publisherId) {
+        const { accessToken, idToken, publisherId, publisherIds } = tokens;
+        const idsForAnalytics = publisherIds || publisherId;
+        if (!idToken || !idsForAnalytics) {
             return res.status(401).json({
                 success: false,
                 error: 'ID token and publisher ID required',
@@ -438,7 +469,7 @@ router.get('/top-performers/:userId', async (req, res) => {
         }
         const startDateTime = `${start}T00:00:00Z`;
         const endDateTime = `${end}T23:59:59Z`;
-        const url = `${LTK_API_BASE}/analytics/top_performers?start_date=${encodeURIComponent(startDateTime)}&end_date=${encodeURIComponent(endDateTime)}&publisher_ids=${publisherId}&platform=rs,ltk&sort_dir=${sort}&dimension=${dim}&last_id=${cursor}&limit=${resultLimit}&timezone=UTC`;
+        const url = `${LTK_API_BASE}/analytics/top_performers?start_date=${encodeURIComponent(startDateTime)}&end_date=${encodeURIComponent(endDateTime)}&publisher_ids=${idsForAnalytics}&platform=rs,ltk&sort_dir=${sort}&dimension=${dim}&last_id=${cursor}&limit=${resultLimit}&timezone=UTC`;
         const result = await fetchLTKApi(url, accessToken, idToken);
         if (result.error) {
             if (result.status === 401) {
@@ -485,8 +516,9 @@ router.get('/contributors/:userId', async (req, res) => {
                 error: 'LTK not connected',
             });
         }
-        const { accessToken, idToken, publisherId } = tokens;
-        if (!idToken || !publisherId) {
+        const { accessToken, idToken, publisherId, publisherIds } = tokens;
+        const idsForAnalytics = publisherIds || publisherId;
+        if (!idToken || !idsForAnalytics) {
             return res.status(401).json({
                 success: false,
                 error: 'ID token and publisher ID required',
@@ -495,7 +527,7 @@ router.get('/contributors/:userId', async (req, res) => {
         }
         const startDateTime = `${start}T00:00:00Z`;
         const endDateTime = `${end}T23:59:59Z`;
-        const url = `${LTK_API_BASE}/analytics/contributors?start_date=${encodeURIComponent(startDateTime)}&end_date=${encodeURIComponent(endDateTime)}&publisher_ids=${publisherId}&platform=rs,ltk&timezone=UTC`;
+        const url = `${LTK_API_BASE}/analytics/contributors?start_date=${encodeURIComponent(startDateTime)}&end_date=${encodeURIComponent(endDateTime)}&publisher_ids=${idsForAnalytics}&platform=rs,ltk&timezone=UTC`;
         const result = await fetchLTKApi(url, accessToken, idToken);
         if (result.error) {
             if (result.status === 401) {
@@ -590,8 +622,9 @@ router.get('/hero-chart/:userId', async (req, res) => {
                 error: 'LTK not connected',
             });
         }
-        const { accessToken, idToken, publisherId } = tokens;
-        if (!idToken || !publisherId) {
+        const { accessToken, idToken, publisherId, publisherIds } = tokens;
+        const idsForAnalytics = publisherIds || publisherId;
+        if (!idToken || !idsForAnalytics) {
             return res.status(401).json({
                 success: false,
                 error: 'ID token and publisher ID required',
@@ -601,7 +634,7 @@ router.get('/hero-chart/:userId', async (req, res) => {
         const startDateTime = `${start}T00:00:00Z`;
         const endDateTime = `${end}T23:59:59Z`;
         // Use creator_ids as shown in the HAR
-        const url = `${LTK_API_BASE}/analytics/hero_chart?start_date=${encodeURIComponent(startDateTime)}&end_date=${encodeURIComponent(endDateTime)}&creator_ids=${publisherId}&interval=${timeInterval}&platform=rs,ltk&timezone=UTC`;
+        const url = `${LTK_API_BASE}/analytics/hero_chart?start_date=${encodeURIComponent(startDateTime)}&end_date=${encodeURIComponent(endDateTime)}&creator_ids=${idsForAnalytics}&interval=${timeInterval}&platform=rs,ltk&timezone=UTC`;
         const result = await fetchLTKApi(url, accessToken, idToken);
         if (result.error) {
             if (result.status === 401) {
@@ -648,7 +681,8 @@ router.get('/performance-summary/:userId', async (req, res) => {
                 error: 'LTK not connected',
             });
         }
-        const { accessToken, idToken, publisherId } = tokens;
+        const { accessToken, idToken, publisherId, publisherIds } = tokens;
+        const idsForAnalytics = publisherIds || publisherId;
         if (!idToken) {
             return res.status(401).json({
                 success: false,
@@ -656,7 +690,7 @@ router.get('/performance-summary/:userId', async (req, res) => {
                 needsReauth: true,
             });
         }
-        const url = `${LTK_API_BASE}/api/creator-analytics/v1/performance_summary?start_date=${encodeURIComponent(start)}&end_date=${encodeURIComponent(end)}&currency=${currencyCode}&platform=rs,ltk&timezone=UTC${publisherId ? `&publisher_ids=${publisherId}` : ''}`;
+        const url = `${LTK_API_BASE}/api/creator-analytics/v1/performance_summary?start_date=${encodeURIComponent(start)}&end_date=${encodeURIComponent(end)}&currency=${currencyCode}&platform=rs,ltk&timezone=UTC${idsForAnalytics ? `&publisher_ids=${idsForAnalytics}` : ''}`;
         const result = await fetchLTKApi(url, accessToken, idToken);
         if (result.error) {
             if (result.status === 401) {
@@ -702,7 +736,8 @@ router.get('/performance-stats/:userId', async (req, res) => {
                 error: 'LTK not connected',
             });
         }
-        const { accessToken, idToken, publisherId } = tokens;
+        const { accessToken, idToken, publisherId, publisherIds } = tokens;
+        const idsForAnalytics = publisherIds || publisherId;
         if (!idToken) {
             return res.status(401).json({
                 success: false,
@@ -710,7 +745,7 @@ router.get('/performance-stats/:userId', async (req, res) => {
                 needsReauth: true,
             });
         }
-        const url = `${LTK_API_BASE}/api/creator-analytics/v1/performance_stats?currency=${currencyCode}${publisherId ? `&publisher_ids=${publisherId}` : ''}`;
+        const url = `${LTK_API_BASE}/api/creator-analytics/v1/performance_stats?currency=${currencyCode}${idsForAnalytics ? `&publisher_ids=${idsForAnalytics}` : ''}`;
         const result = await fetchLTKApi(url, accessToken, idToken);
         if (result.error) {
             if (result.status === 401) {
@@ -955,7 +990,8 @@ router.get('/all-data/:userId', async (req, res) => {
                 error: 'LTK not connected',
             });
         }
-        const { accessToken, idToken, publisherId } = tokens;
+        const { accessToken, idToken, publisherId, publisherIds } = tokens;
+        const idsForAnalytics = publisherIds || publisherId;
         if (!idToken) {
             return res.status(401).json({
                 success: false,
@@ -966,8 +1002,8 @@ router.get('/all-data/:userId', async (req, res) => {
         // Fetch all endpoints in parallel
         const [commissionsSummary, performanceSummary, performanceStats, itemsSold, userInfo,] = await Promise.all([
             fetchLTKApi(`${LTK_API_BASE}/api/creator-analytics/v1/commissions_summary?currency=${currencyCode}`, accessToken, idToken),
-            fetchLTKApi(`${LTK_API_BASE}/api/creator-analytics/v1/performance_summary?start_date=${encodeURIComponent(start)}&end_date=${encodeURIComponent(end)}&currency=${currencyCode}&platform=rs,ltk&timezone=UTC${publisherId ? `&publisher_ids=${publisherId}` : ''}`, accessToken, idToken),
-            fetchLTKApi(`${LTK_API_BASE}/api/creator-analytics/v1/performance_stats?currency=${currencyCode}`, accessToken, idToken),
+            fetchLTKApi(`${LTK_API_BASE}/api/creator-analytics/v1/performance_summary?start_date=${encodeURIComponent(start)}&end_date=${encodeURIComponent(end)}&currency=${currencyCode}&platform=rs,ltk&timezone=UTC${idsForAnalytics ? `&publisher_ids=${idsForAnalytics}` : ''}`, accessToken, idToken),
+            fetchLTKApi(`${LTK_API_BASE}/api/creator-analytics/v1/performance_stats?currency=${currencyCode}${idsForAnalytics ? `&publisher_ids=${idsForAnalytics}` : ''}`, accessToken, idToken),
             fetchLTKApi(`${LTK_API_BASE}/api/creator-analytics/v1/items_sold/?limit=100&start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}&currency=${currencyCode}`, accessToken, idToken),
             fetchLTKApi(`${LTK_API_BASE}/api/co-api/v1/get_user_info`, accessToken, idToken),
         ]);
