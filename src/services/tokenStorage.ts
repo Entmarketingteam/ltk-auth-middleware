@@ -111,16 +111,22 @@ export async function storeTokens(
   const publisherId = tokens.publisherId || extractPublisherId(tokens.idToken);
   console.log(`[Token Storage] Extracted publisher_id: ${publisherId}`);
 
-  // Check if connection already exists
+  // Check if connection already exists and get existing metadata
   const { data: existing } = await db
     .from('platform_connections')
-    .select('id')
+    .select('id, metadata')
     .eq('user_id', userId)
     .eq('platform', 'LTK')
     .single();
 
-  // Use provided publisherIds or just the primary one
-  const allPublisherIds = tokens.publisherIds || publisherId;
+  // IMPORTANT: Preserve existing publisher_ids if already set (don't overwrite with single ID)
+  const existingMetadata = (existing?.metadata as Record<string, unknown>) || {};
+  const existingPublisherIds = existingMetadata.publisher_ids as string | undefined;
+
+  // Use: 1) provided publisherIds, 2) existing publisherIds, 3) just the primary one
+  const allPublisherIds = tokens.publisherIds || existingPublisherIds || publisherId;
+
+  console.log(`[Token Storage] Using publisher_ids: ${allPublisherIds} (existing: ${existingPublisherIds || 'none'})`);
 
   const connectionData = {
     user_id: userId,
