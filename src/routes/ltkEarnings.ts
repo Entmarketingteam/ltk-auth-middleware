@@ -31,7 +31,7 @@ interface LTKEarningsItem {
 /**
  * Make API call using Puppeteer browser context (bypasses DNS issues)
  */
-async function fetchWithPuppeteer(url: string, accessToken: string): Promise<any> {
+async function fetchWithPuppeteer(url: string, accessToken: string, idToken: string): Promise<any> {
   console.log('[Puppeteer Fetch] Starting browser for:', url);
 
   const browser = await puppeteer.launch({
@@ -50,12 +50,52 @@ async function fetchWithPuppeteer(url: string, accessToken: string): Promise<any
     // Set a reasonable timeout
     page.setDefaultTimeout(30000);
 
-    // First navigate to LTK domain to establish context
-    await page.goto('https://creator.shopltk.com', { waitUntil: 'domcontentloaded' });
+    // Navigate to LTK to get proper context
+    console.log('[Puppeteer Fetch] Navigating to creator.shopltk.com...');
+    await page.goto('https://creator.shopltk.com', { waitUntil: 'networkidle0', timeout: 30000 });
 
-    // Make the API call from within the browser context
+    // Inject the Auth0 tokens into localStorage (mimic logged-in state)
+    console.log('[Puppeteer Fetch] Injecting tokens into localStorage...');
+    await page.evaluate((accessTok: string, idTok: string) => {
+      // Store tokens in Auth0 SPA format
+      const auth0Key = '@@auth0spajs@@::iKyQz7GfBMBPqUqCbbKSNBUlM2VpNWUT::https://creator-api-gateway.shopltk.com/v1::openid profile email ltk.publisher offline_access';
+      const auth0Value = JSON.stringify({
+        body: {
+          access_token: accessTok,
+          token_type: 'Bearer',
+          expires_in: 86400,
+        },
+        expiresAt: Date.now() + 86400000,
+      });
+      localStorage.setItem(auth0Key, auth0Value);
+
+      // Also set the user key
+      const userKey = '@@auth0spajs@@::iKyQz7GfBMBPqUqCbbKSNBUlM2VpNWUT::@@user@@';
+      const userValue = JSON.stringify({
+        id_token: idTok,
+      });
+      localStorage.setItem(userKey, userValue);
+
+      // Set authenticated cookie
+      document.cookie = 'auth0.iKyQz7GfBMBPqUqCbbKSNBUlM2VpNWUT.is.authenticated=true; path=/';
+    }, accessToken, idToken);
+
+    // Reload the page to pick up the tokens
+    console.log('[Puppeteer Fetch] Reloading page with tokens...');
+    await page.reload({ waitUntil: 'networkidle0' });
+
+    // Wait a moment for any client-side initialization
+    await new Promise(resolve => setTimeout(resolve, 2000));
+
+    // Check current URL and log it
+    const currentUrl = page.url();
+    console.log('[Puppeteer Fetch] Current URL after reload:', currentUrl);
+
+    // Now try to make the API call from within the browser context
+    console.log('[Puppeteer Fetch] Making API call...');
     const result = await page.evaluate(async (apiUrl: string, token: string) => {
       try {
+        console.log('Browser fetch to:', apiUrl);
         const response = await fetch(apiUrl, {
           method: 'GET',
           headers: {
@@ -63,24 +103,29 @@ async function fetchWithPuppeteer(url: string, accessToken: string): Promise<any
             'Content-Type': 'application/json',
             'Accept': 'application/json',
           },
+          credentials: 'include',
         });
 
+        console.log('Response status:', response.status);
+
         if (!response.ok) {
+          const text = await response.text();
           return {
             error: true,
             status: response.status,
             statusText: response.statusText,
-            body: await response.text()
+            body: text
           };
         }
 
         return { error: false, data: await response.json() };
       } catch (e: any) {
-        return { error: true, message: e.message };
+        console.error('Fetch error:', e);
+        return { error: true, message: e.message, stack: e.stack };
       }
     }, url, accessToken);
 
-    console.log('[Puppeteer Fetch] Result received, error:', result.error);
+    console.log('[Puppeteer Fetch] Result:', JSON.stringify(result).substring(0, 200));
     return result;
 
   } finally {
@@ -122,14 +167,14 @@ router.get('/earnings/:userId', async (req: Request, res: Response) => {
       });
     }
 
-    const { accessToken } = tokens;
+    const { accessToken, idToken } = tokens;
     console.log('[LTK Earnings] Token prefix:', accessToken.substring(0, 50) + '...');
 
     // 3. First get creator info to get creator_id
     console.log('[LTK Earnings] Fetching creator info via Puppeteer...');
     const creatorUrl = `${LTK_API_BASE}/v1/creator/me`;
 
-    const meResult = await fetchWithPuppeteer(creatorUrl, accessToken);
+    const meResult = await fetchWithPuppeteer(creatorUrl, accessToken, idToken || '');
 
     if (meResult.error) {
       console.error('[LTK Earnings] Failed to get creator info:', meResult);
@@ -159,7 +204,7 @@ router.get('/earnings/:userId', async (req: Request, res: Response) => {
     console.log('[LTK Earnings] Fetching earnings data...');
     const earningsUrl = `${LTK_API_BASE}/v1/analytics/earnings?creator_id=${creatorId}&start_date=${start}&end_date=${end}`;
 
-    const earningsResult = await fetchWithPuppeteer(earningsUrl, accessToken);
+    const earningsResult = await fetchWithPuppeteer(earningsUrl, accessToken, idToken || '');
 
     if (earningsResult.error) {
       console.error('[LTK Earnings] Failed to fetch earnings:', earningsResult);
@@ -234,10 +279,10 @@ router.get('/analytics/:userId', async (req: Request, res: Response) => {
       });
     }
 
-    const { accessToken } = tokens;
+    const { accessToken, idToken } = tokens;
 
     // Get creator ID first
-    const meResult = await fetchWithPuppeteer(`${LTK_API_BASE}/v1/creator/me`, accessToken);
+    const meResult = await fetchWithPuppeteer(`${LTK_API_BASE}/v1/creator/me`, accessToken, idToken || '');
 
     if (meResult.error) {
       throw new Error('Failed to get creator info');
@@ -261,7 +306,7 @@ router.get('/analytics/:userId', async (req: Request, res: Response) => {
         break;
     }
 
-    const result = await fetchWithPuppeteer(endpoint, accessToken);
+    const result = await fetchWithPuppeteer(endpoint, accessToken, idToken || '');
 
     if (result.error) {
       throw new Error(`Failed to fetch ${analyticsType} analytics`);
