@@ -433,4 +433,336 @@ router.get('/commissions/:userId', async (req: Request, res: Response) => {
   }
 });
 
+/**
+ * GET /api/ltk/overview/:userId
+ * Master analytics endpoint - unified dashboard data
+ * Returns: earnings, clicks, sales, commissions, graphs, platform breakdown, retailer earnings
+ */
+router.get('/overview/:userId', async (req: Request, res: Response) => {
+  const { userId } = req.params;
+  const { startDate, endDate, currency } = req.query;
+
+  const end = (endDate as string) || new Date().toISOString();
+  const start = (startDate as string) || new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+  const currencyCode = (currency as string) || 'USD';
+
+  console.log(`[LTK Overview] Fetching overview for user ${userId}`);
+
+  try {
+    const tokens = await getTokens(userId);
+    if (!tokens) {
+      return res.status(401).json({
+        success: false,
+        error: 'LTK not connected',
+      });
+    }
+
+    const { accessToken, idToken, publisherId } = tokens;
+
+    if (!idToken) {
+      return res.status(401).json({
+        success: false,
+        error: 'ID token required',
+        needsReauth: true,
+      });
+    }
+
+    // v1 overview endpoint - supports both ISO timestamps and creator_ids
+    const url = `${LTK_API_BASE}/api/creator-analytics/v1/overview?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}&currency=${currencyCode}&platform=rs,ltk&timezone=UTC${publisherId ? `&creator_ids=${publisherId}` : ''}`;
+
+    const result = await fetchLTKApi(url, accessToken, idToken);
+
+    if (result.error) {
+      if (result.status === 401) {
+        return res.status(401).json({
+          success: false,
+          error: 'Token expired',
+          needsReauth: true,
+        });
+      }
+      throw new Error(`Failed to fetch overview: ${result.status} ${result.statusText}`);
+    }
+
+    res.json({
+      success: true,
+      overview: result.data,
+      period: { start, end },
+      currency: currencyCode,
+      publisherId,
+    });
+
+  } catch (error: any) {
+    console.error('[LTK Overview] Error:', error.message);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
+/**
+ * GET /api/ltk/top-performers/:userId
+ * Top performers with dimension support (links, brands, posts, commissions)
+ */
+router.get('/top-performers/:userId', async (req: Request, res: Response) => {
+  const { userId } = req.params;
+  const { startDate, endDate, dimension, sortDir, limit, lastId } = req.query;
+
+  const end = (endDate as string) || new Date().toISOString().split('T')[0];
+  const start = (startDate as string) || new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+  const dim = (dimension as string) || 'commissions'; // commissions, links, brands, posts
+  const sort = (sortDir as string) || 'desc';
+  const resultLimit = parseInt(limit as string) || 50;
+  const cursor = (lastId as string) || '0';
+
+  console.log(`[LTK Top Performers] Fetching ${dim} for user ${userId}`);
+
+  try {
+    const tokens = await getTokens(userId);
+    if (!tokens) {
+      return res.status(401).json({
+        success: false,
+        error: 'LTK not connected',
+      });
+    }
+
+    const { accessToken, idToken, publisherId } = tokens;
+
+    if (!idToken || !publisherId) {
+      return res.status(401).json({
+        success: false,
+        error: 'ID token and publisher ID required',
+        needsReauth: true,
+      });
+    }
+
+    const startDateTime = `${start}T00:00:00Z`;
+    const endDateTime = `${end}T23:59:59Z`;
+
+    const url = `${LTK_API_BASE}/analytics/top_performers?start_date=${encodeURIComponent(startDateTime)}&end_date=${encodeURIComponent(endDateTime)}&publisher_ids=${publisherId}&platform=rs,ltk&sort_dir=${sort}&dimension=${dim}&last_id=${cursor}&limit=${resultLimit}&timezone=UTC`;
+
+    const result = await fetchLTKApi(url, accessToken, idToken);
+
+    if (result.error) {
+      if (result.status === 401) {
+        return res.status(401).json({
+          success: false,
+          error: 'Token expired',
+          needsReauth: true,
+        });
+      }
+      throw new Error(`Failed to fetch top performers: ${result.status} ${result.statusText}`);
+    }
+
+    res.json({
+      success: true,
+      dimension: dim,
+      data: result.data?.data || result.data || [],
+      nextCursor: result.data?.last_id || null,
+      period: { start, end },
+      publisherId,
+    });
+
+  } catch (error: any) {
+    console.error('[LTK Top Performers] Error:', error.message);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
+/**
+ * GET /api/ltk/contributors/:userId
+ * Contributors leaderboard
+ */
+router.get('/contributors/:userId', async (req: Request, res: Response) => {
+  const { userId } = req.params;
+  const { startDate, endDate } = req.query;
+
+  const end = (endDate as string) || new Date().toISOString().split('T')[0];
+  const start = (startDate as string) || new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+
+  console.log(`[LTK Contributors] Fetching contributors for user ${userId}`);
+
+  try {
+    const tokens = await getTokens(userId);
+    if (!tokens) {
+      return res.status(401).json({
+        success: false,
+        error: 'LTK not connected',
+      });
+    }
+
+    const { accessToken, idToken, publisherId } = tokens;
+
+    if (!idToken || !publisherId) {
+      return res.status(401).json({
+        success: false,
+        error: 'ID token and publisher ID required',
+        needsReauth: true,
+      });
+    }
+
+    const startDateTime = `${start}T00:00:00Z`;
+    const endDateTime = `${end}T23:59:59Z`;
+
+    const url = `${LTK_API_BASE}/analytics/contributors?start_date=${encodeURIComponent(startDateTime)}&end_date=${encodeURIComponent(endDateTime)}&publisher_ids=${publisherId}&platform=rs,ltk&timezone=UTC`;
+
+    const result = await fetchLTKApi(url, accessToken, idToken);
+
+    if (result.error) {
+      if (result.status === 401) {
+        return res.status(401).json({
+          success: false,
+          error: 'Token expired',
+          needsReauth: true,
+        });
+      }
+      throw new Error(`Failed to fetch contributors: ${result.status} ${result.statusText}`);
+    }
+
+    res.json({
+      success: true,
+      contributors: result.data?.data || result.data || [],
+      period: { start, end },
+      publisherId,
+    });
+
+  } catch (error: any) {
+    console.error('[LTK Contributors] Error:', error.message);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
+/**
+ * GET /api/ltk/account/:userId
+ * Creator account info (profile, merchant approvals, avatar, etc.)
+ */
+router.get('/account/:userId', async (req: Request, res: Response) => {
+  const { userId } = req.params;
+
+  console.log(`[LTK Account] Fetching account info for user ${userId}`);
+
+  try {
+    const tokens = await getTokens(userId);
+    if (!tokens) {
+      return res.status(401).json({
+        success: false,
+        error: 'LTK not connected',
+      });
+    }
+
+    const { accessToken, idToken, publisherId } = tokens;
+
+    if (!idToken || !publisherId) {
+      return res.status(401).json({
+        success: false,
+        error: 'ID token and publisher ID required',
+        needsReauth: true,
+      });
+    }
+
+    const url = `${LTK_API_BASE}/api/creator-account-service/v1/users/${publisherId}`;
+
+    const result = await fetchLTKApi(url, accessToken, idToken);
+
+    if (result.error) {
+      if (result.status === 401) {
+        return res.status(401).json({
+          success: false,
+          error: 'Token expired',
+          needsReauth: true,
+        });
+      }
+      throw new Error(`Failed to fetch account: ${result.status} ${result.statusText}`);
+    }
+
+    res.json({
+      success: true,
+      account: result.data,
+      publisherId,
+    });
+
+  } catch (error: any) {
+    console.error('[LTK Account] Error:', error.message);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
+/**
+ * GET /api/ltk/hero-chart/:userId
+ * Hero chart time-series data (earnings over time)
+ */
+router.get('/hero-chart/:userId', async (req: Request, res: Response) => {
+  const { userId } = req.params;
+  const { startDate, endDate, interval } = req.query;
+
+  const end = (endDate as string) || new Date().toISOString().split('T')[0];
+  const start = (startDate as string) || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+  const timeInterval = (interval as string) || 'day'; // day, week, month
+
+  console.log(`[LTK Hero Chart] Fetching hero chart for user ${userId}`);
+
+  try {
+    const tokens = await getTokens(userId);
+    if (!tokens) {
+      return res.status(401).json({
+        success: false,
+        error: 'LTK not connected',
+      });
+    }
+
+    const { accessToken, idToken, publisherId } = tokens;
+
+    if (!idToken || !publisherId) {
+      return res.status(401).json({
+        success: false,
+        error: 'ID token and publisher ID required',
+        needsReauth: true,
+      });
+    }
+
+    const startDateTime = `${start}T00:00:00Z`;
+    const endDateTime = `${end}T23:59:59Z`;
+
+    // Use creator_ids as shown in the HAR
+    const url = `${LTK_API_BASE}/analytics/hero_chart?start_date=${encodeURIComponent(startDateTime)}&end_date=${encodeURIComponent(endDateTime)}&creator_ids=${publisherId}&interval=${timeInterval}&platform=rs,ltk&timezone=UTC`;
+
+    const result = await fetchLTKApi(url, accessToken, idToken);
+
+    if (result.error) {
+      if (result.status === 401) {
+        return res.status(401).json({
+          success: false,
+          error: 'Token expired',
+          needsReauth: true,
+        });
+      }
+      throw new Error(`Failed to fetch hero chart: ${result.status} ${result.statusText}`);
+    }
+
+    res.json({
+      success: true,
+      heroChart: result.data,
+      interval: timeInterval,
+      period: { start, end },
+      publisherId,
+    });
+
+  } catch (error: any) {
+    console.error('[LTK Hero Chart] Error:', error.message);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
 export default router;
