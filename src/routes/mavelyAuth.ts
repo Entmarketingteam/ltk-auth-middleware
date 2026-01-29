@@ -17,6 +17,7 @@ import {
 } from '../services/platformStorage.js';
 import { extractMavelyData, exportMavelyCSV } from '../services/mavelyDataExtraction.js';
 import { appendToGoogleSheets } from '../services/googleSheets.js';
+import { authRateLimiter, extractionRateLimiter } from '../utils/rateLimiter.js';
 
 const router = Router();
 
@@ -24,8 +25,9 @@ const router = Router();
  * POST /api/mavely/connect
  * 
  * Connect a creator's Mavely account using their credentials.
+ * Rate limited to 5 attempts per 15 minutes per IP.
  */
-router.post('/connect', async (req: Request, res: Response) => {
+router.post('/connect', authRateLimiter, async (req: Request, res: Response) => {
   const { userId, email, password } = req.body;
   
   if (!userId || typeof userId !== 'string') {
@@ -158,8 +160,9 @@ router.delete('/disconnect/:userId', async (req: Request, res: Response) => {
  * POST /api/mavely/extract/:userId
  *
  * Extract analytics data from Mavely for a date range
+ * Rate limited to 30 requests per 15 minutes per IP.
  */
-router.post('/extract/:userId', async (req: Request, res: Response) => {
+router.post('/extract/:userId', extractionRateLimiter, async (req: Request, res: Response) => {
   const { userId } = req.params;
   const { startDate, endDate, exportToSheets, spreadsheetId, sheetName } = req.body;
 
@@ -220,8 +223,9 @@ router.post('/extract/:userId', async (req: Request, res: Response) => {
  * POST /api/mavely/export-csv/:userId
  *
  * Attempt to export CSV from Mavely (if available)
+ * Rate limited to 30 requests per 15 minutes per IP.
  */
-router.post('/export-csv/:userId', async (req: Request, res: Response) => {
+router.post('/export-csv/:userId', extractionRateLimiter, async (req: Request, res: Response) => {
   const { userId } = req.params;
   const { startDate, endDate } = req.body;
 
