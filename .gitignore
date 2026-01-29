@@ -20,7 +20,7 @@ Thumbs.db
 
 # IDE
 .idea/
-.vscode/
+# .vscode/ - Keep this for better dev experience in Cursor/VS Code
 *.swp
 *.swo
 
