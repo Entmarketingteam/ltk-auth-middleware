@@ -13,6 +13,7 @@ const express_1 = require("express");
 const puppeteerLogin_js_1 = require("../services/puppeteerLogin.js");
 const tokenStorage_js_1 = require("../services/tokenStorage.js");
 const tokenRefresh_js_1 = require("../services/tokenRefresh.js");
+const rateLimiter_js_1 = require("../utils/rateLimiter.js");
 const router = (0, express_1.Router)();
 /**
  * POST /api/ltk/connect
@@ -20,8 +21,9 @@ const router = (0, express_1.Router)();
  * Connect a creator's LTK account using their credentials.
  * Credentials are used once for login, then discarded.
  * Only encrypted tokens are stored.
+ * Rate limited to 5 attempts per 15 minutes per IP.
  */
-router.post('/connect', async (req, res) => {
+router.post('/connect', rateLimiter_js_1.authRateLimiter, async (req, res) => {
     const { userId, email, password } = req.body;
     // Validate input
     if (!userId || typeof userId !== 'string') {

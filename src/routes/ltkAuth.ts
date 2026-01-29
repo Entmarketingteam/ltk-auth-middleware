@@ -18,6 +18,7 @@ import {
   getTokens
 } from '../services/tokenStorage.js';
 import { refreshUserTokens } from '../services/tokenRefresh.js';
+import { authRateLimiter } from '../utils/rateLimiter.js';
 
 const router = Router();
 
@@ -27,8 +28,9 @@ const router = Router();
  * Connect a creator's LTK account using their credentials.
  * Credentials are used once for login, then discarded.
  * Only encrypted tokens are stored.
+ * Rate limited to 5 attempts per 15 minutes per IP.
  */
-router.post('/connect', async (req: Request, res: Response) => {
+router.post('/connect', authRateLimiter, async (req: Request, res: Response) => {
   const { userId, email, password } = req.body;
   
   // Validate input

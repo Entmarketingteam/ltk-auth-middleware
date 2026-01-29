@@ -18,7 +18,10 @@ const helmet_1 = __importDefault(require("helmet"));
 const ltkAuth_js_1 = __importDefault(require("./routes/ltkAuth.js"));
 const ltkProxy_js_1 = __importDefault(require("./routes/ltkProxy.js"));
 const ltkEarnings_js_1 = __importDefault(require("./routes/ltkEarnings.js"));
+const mavelyAuth_js_1 = __importDefault(require("./routes/mavelyAuth.js"));
+const scheduledJobs_js_1 = __importDefault(require("./routes/scheduledJobs.js"));
 const tokenRefresh_js_1 = require("./services/tokenRefresh.js");
+const scheduledExtraction_js_1 = require("./services/scheduledExtraction.js");
 const app = (0, express_1.default)();
 const PORT = process.env.PORT || 3000;
 // Security middleware
@@ -53,6 +56,10 @@ app.use('/api/ltk', ltkAuth_js_1.default);
 app.use('/api/ltk', ltkEarnings_js_1.default);
 // LTK API Proxy routes
 app.use('/api/ltk', ltkProxy_js_1.default);
+// Mavely Authentication and Data Extraction routes
+app.use('/api/mavely', mavelyAuth_js_1.default);
+// Scheduled Jobs Management routes
+app.use('/api/scheduled', scheduledJobs_js_1.default);
 // 404 handler
 app.use((req, res) => {
     res.status(404).json({
@@ -73,11 +80,11 @@ app.listen(PORT, () => {
     console.log(`
 ╔═══════════════════════════════════════════════════════════════╗
 ║                                                               ║
-║   🔐 LTK Auth Middleware                                      ║
+║   🔐 Multi-Platform Auth Middleware                           ║
 ║                                                               ║
 ║   Server running on port ${PORT}                                ║
 ║                                                               ║
-║   Endpoints:                                                  ║
+║   LTK Endpoints:                                              ║
 ║   • POST /api/ltk/connect          Connect LTK account        ║
 ║   • GET  /api/ltk/status/:userId   Check connection           ║
 ║   • POST /api/ltk/refresh/:userId  Refresh tokens             ║
@@ -86,10 +93,19 @@ app.listen(PORT, () => {
 ║   • GET  /api/ltk/analytics/:userId Fetch LTK analytics       ║
 ║   • GET  /api/ltk/*                Proxy to LTK API           ║
 ║                                                               ║
+║   Mavely Endpoints:                                           ║
+║   • POST /api/mavely/connect       Connect Mavely account     ║
+║   • GET  /api/mavely/status/:userId Check connection          ║
+║   • DELETE /api/mavely/disconnect/:userId Disconnect          ║
+║   • POST /api/mavely/extract/:userId Extract analytics        ║
+║   • POST /api/mavely/export-csv/:userId Export CSV            ║
+║                                                               ║
 ╚═══════════════════════════════════════════════════════════════╝
   `);
     // Start background token refresh job
     (0, tokenRefresh_js_1.startTokenRefreshJob)();
+    // Start scheduled data extraction job
+    (0, scheduledExtraction_js_1.startScheduledDataExtraction)();
 });
 // Graceful shutdown
 process.on('SIGTERM', () => {

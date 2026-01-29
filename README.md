@@ -1,6 +1,37 @@
-# LTK Auth Middleware
+# Multi-Platform Creator Analytics Middleware
 
-A Plaid-style authentication middleware for LTK (RewardStyle) that allows creators to securely connect their accounts without a Chrome extension.
+A Plaid-style authentication middleware that allows creators to securely connect their accounts from multiple platforms without browser extensions. Now supports automated data extraction and Google Sheets integration.
+
+## Supported Platforms
+
+- ✅ **LTK (RewardStyle)** - Full support
+- ✅ **Mavely** - NEW! Full support with scheduled extraction
+- 🚧 **Amazon Creator** - Coming soon
+- 🚧 **ShopMY** - Coming soon
+
+## Key Features
+
+### 🔐 Secure Authentication
+- Plaid-style credential flow (passwords never stored)
+- AES-256-GCM encrypted token storage
+- Automated headless browser login
+- HTTPS-only transmission
+
+### 📊 Automated Data Extraction
+- **NEW:** Daily scheduled extraction to Google Sheets
+- Manual on-demand data extraction
+- CSV export support (where available)
+- Customizable date ranges
+
+### 📅 Scheduled Jobs
+- Configurable cron schedules (default: daily at 2 AM UTC)
+- Automatic append to Google Sheets
+- Per-user, per-platform configuration
+- Background processing
+
+## Quick Start
+
+See [MAVELY-INTEGRATION.md](./MAVELY-INTEGRATION.md) for detailed Mavely setup and usage.
 
 ## How It Works
 
@@ -51,6 +82,10 @@ SUPABASE_SERVICE_KEY=eyJ...  # Service role key, not anon key!
 
 # Encryption
 ENCRYPTION_KEY=your-32-byte-encryption-key  # Generate with: openssl rand -hex 32
+
+# Google Sheets (for automated data extraction)
+GOOGLE_SERVICE_ACCOUNT_EMAIL=your-service-account@project.iam.gserviceaccount.com
+GOOGLE_SERVICE_ACCOUNT_KEY=-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n
 
 # App
 PORT=3000

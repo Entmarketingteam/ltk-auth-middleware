@@ -15,7 +15,10 @@ import helmet from 'helmet';
 import ltkAuthRoutes from './routes/ltkAuth.js';
 import ltkProxyRoutes from './routes/ltkProxy.js';
 import ltkEarningsRoutes from './routes/ltkEarnings.js';
+import mavelyAuthRoutes from './routes/mavelyAuth.js';
+import scheduledJobsRoutes from './routes/scheduledJobs.js';
 import { startTokenRefreshJob } from './services/tokenRefresh.js';
+import { startScheduledDataExtraction } from './services/scheduledExtraction.js';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -60,6 +63,12 @@ app.use('/api/ltk', ltkEarningsRoutes);
 // LTK API Proxy routes
 app.use('/api/ltk', ltkProxyRoutes);
 
+// Mavely Authentication and Data Extraction routes
+app.use('/api/mavely', mavelyAuthRoutes);
+
+// Scheduled Jobs Management routes
+app.use('/api/scheduled', scheduledJobsRoutes);
+
 // 404 handler
 app.use((req, res) => {
   res.status(404).json({
@@ -82,11 +91,11 @@ app.listen(PORT, () => {
   console.log(`
 ╔═══════════════════════════════════════════════════════════════╗
 ║                                                               ║
-║   🔐 LTK Auth Middleware                                      ║
+║   🔐 Multi-Platform Auth Middleware                           ║
 ║                                                               ║
 ║   Server running on port ${PORT}                                ║
 ║                                                               ║
-║   Endpoints:                                                  ║
+║   LTK Endpoints:                                              ║
 ║   • POST /api/ltk/connect          Connect LTK account        ║
 ║   • GET  /api/ltk/status/:userId   Check connection           ║
 ║   • POST /api/ltk/refresh/:userId  Refresh tokens             ║
@@ -95,11 +104,21 @@ app.listen(PORT, () => {
 ║   • GET  /api/ltk/analytics/:userId Fetch LTK analytics       ║
 ║   • GET  /api/ltk/*                Proxy to LTK API           ║
 ║                                                               ║
+║   Mavely Endpoints:                                           ║
+║   • POST /api/mavely/connect       Connect Mavely account     ║
+║   • GET  /api/mavely/status/:userId Check connection          ║
+║   • DELETE /api/mavely/disconnect/:userId Disconnect          ║
+║   • POST /api/mavely/extract/:userId Extract analytics        ║
+║   • POST /api/mavely/export-csv/:userId Export CSV            ║
+║                                                               ║
 ╚═══════════════════════════════════════════════════════════════╝
   `);
   
   // Start background token refresh job
   startTokenRefreshJob();
+  
+  // Start scheduled data extraction job
+  startScheduledDataExtraction();
 });
 
 // Graceful shutdown
